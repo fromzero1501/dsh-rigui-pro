@@ -131,6 +131,24 @@ function writeStore(s) {
   } catch (e) { console.warn('[dsh-rigui-pro] 存提醒失败', e && e.message) }
 }
 
+// 排程失败时把模型原话留一份，方便事后看它到底回了什么（最多留 5 条）
+function planDebug(rec) {
+  try {
+    const f = join(dirname(STORE_FILE), 'rigui-pro-plan-debug.json')
+    let arr = []
+    try { arr = JSON.parse(readFileSync(f, 'utf8')) } catch {}
+    if (!Array.isArray(arr)) arr = []
+    arr.push({
+      at: rec.at || Date.now(),
+      model: String(rec.model || '').slice(0, 60),
+      error: String(rec.error || '').slice(0, 200),
+      kinds: rec.kinds || {},
+      text: String(rec.text || '').slice(0, 2000),
+    })
+    writeFileSync(f, JSON.stringify(arr.slice(-5), null, 2), 'utf8')
+  } catch (e) { console.warn('[dsh-rigui-pro] 排程调试记录没写成', e && e.message) }
+}
+
 // ---------- 系统弹窗 ----------
 // 只留字母数字与常见中文标点，避免拼进 PowerShell 单引号串里出岔
 function esc(v) { return String(v == null ? '' : v).replace(/[`"'\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim() }
@@ -691,6 +709,7 @@ function makeAsk(ctx) {
     const efforts = info?.reasoning?.efforts ?? []
     const effort = efforts.some((e) => e.id === 'off') ? 'off' : efforts.at(0)?.id
     let text = '', finish
+    const kinds = {}
     for await (const chunk of ctx.llm.stream({
       provider: route.provider,
       model: route.model,
@@ -700,15 +719,19 @@ function makeAsk(ctx) {
       maxTokens,
       signal,
     })) {
-      if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') text += chunk.text
-      else if (chunk?.type === 'finish') finish = chunk.reason
+      const kind = String(chunk?.type || '?')
+      kinds[kind] = (kinds[kind] || 0) + 1
+      if (kind === 'finish') { finish = chunk.reason; continue }
+      // 不同 host 版本对增量文本的字段名不完全一致，几种常见形状都接一下，别因为读错字段就当模型没说话
+      const piece = chunk?.text ?? chunk?.delta ?? chunk?.content?.text ?? chunk?.value ?? (typeof chunk?.delta === 'string' ? chunk.delta : undefined)
+      if (kind !== 'reasoning-delta' && typeof piece === 'string' && piece) text += piece
     }
     if (finish && (finish.kind === 'error' || finish.kind === 'aborted')) {
       const msg = finish.failure?.message || '模型调用失败'
       if (/max.?token|length/i.test(msg)) throw new Error('这次事情太多，一次排不下，分两段说试试')
       throw new Error(msg)
     }
-    return { text, model: route.model }
+    return { text, model: route.model, kinds }
   }
 }
 
@@ -879,9 +902,29 @@ export function apply(ctx) {
 
     if (body.endpoint === 'plan' || body.endpoint === 'replan') {
       const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) ? p.date : ymd(new Date())
-      const r = await ask(PLAN_SYSTEM, planPrompt({ ...p, date: dateStr }), { signal, maxTokens: 2400, strong: true })
-      const plan = tidyPlan(extractJSON(r.text), dateStr, p.busy)
-      return { ok: true, model: r.model, result: plan }
+      const prompt = planPrompt({ ...p, date: dateStr })
+      // 先用平时那个强一点的模型；它要是没给出 JSON（有的模型会先写一段人话、或者把预算全花在思考上），
+      // 就换快模型再排一次——排程这事不能因为模型脾气就停在「还没排出来」。
+      let last = { plan: null, model: '', text: '', err: '', kinds: {} }
+      for (const strong of [true, false]) {
+        const r = await ask(PLAN_SYSTEM, prompt, { signal, maxTokens: 2400, strong })
+        try {
+          const plan = tidyPlan(extractJSON(r.text), dateStr, p.busy)
+          if (plan.blocks.length) return { ok: true, model: r.model, result: plan }
+          last = { plan, model: r.model, text: r.text, err: '', kinds: r.kinds }
+        } catch (e) {
+          last = { plan: null, model: r.model, text: r.text, err: String(e.message || e), kinds: r.kinds }
+        }
+        planDebug({ at: now, model: last.model, strong, text: last.text, error: last.err, kinds: last.kinds })
+      }
+      if (last.plan) return { ok: true, model: last.model, result: last.plan }
+      const seen = String(last.text || '').replace(/\s+/g, ' ').trim().slice(0, 120)
+      const shape = Object.entries(last.kinds || {}).map(([k, n]) => k + '×' + n).join(' ')
+      throw new Error(
+        '模型没有给出可用的结果' +
+          (last.err ? '：' + last.err : '') +
+          (seen ? '｜它说的是：' + seen : '｜它一个字也没回' + (shape ? '（收到的片段：' + shape + '）' : '')),
+      )
     }
 
     if (body.endpoint === 'coach') {
