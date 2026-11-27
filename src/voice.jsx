@@ -35,16 +35,20 @@ const CSS = `
 .rv-btn:hover{background:rgba(31,35,40,.05)}
 .rv-btn.main{background:#1F2328;color:#F4F5F1;border-color:#1F2328;font-weight:600}
 .rv-btn.main:disabled{opacity:.45;cursor:default}
+.rv-btn.sm{height:26px;min-width:26px;padding:0 8px;border-radius:8px;font-size:13px;line-height:1}
+.rv-num{min-width:56px;text-align:center;font-variant-numeric:tabular-nums;font-size:13px}
+.rv-row .rh-inline{display:inline-flex;align-items:center;gap:6px}
 `
 
 const READ_KINDS = ['water', 'shower', 'hair', 'meal', 'sleep']
+const GROUPS = [['routine', '日常琐事'], ['todo', '待办'], ['event', '日程']]
 
 const blank = (v) => ({
   cloud: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini-tts', voice: 'alloy', format: 'mp3', ...((v && v.cloud) || {}) },
   local: { shape: 'gradio', baseUrl: 'http://127.0.0.1:7860', apiName: 'gen_single', format: 'wav', ...((v && v.local) || {}) },
 })
 
-export default function VoicePanel({ open, voice, onClose, onSave, onTest, onToggleRead }) {
+export default function VoicePanel({ open, voice, onClose, onSave, onTest, onToggleRead, onGroup, onLead }) {
   const v = voice || {}
   const [d, setD] = useState(() => blank(v))
   const [busy, setBusy] = useState(false)
@@ -153,6 +157,26 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
             )
           })}
           <p className="rv-note">卡片上每件事旁边的小喇叭跟这里同步：点亮就念，再点一下这件事就不念。</p>
+
+          <div className="rv-sub">哪几类要念</div>
+          {GROUPS.map(([g, name]) => {
+            const gOn = !(v.groups && v.groups[g] === false)
+            return (
+              <div className="rv-row" key={g}>
+                <span className="n">{name}</span>
+                <button type="button" className={'rv-sw' + (gOn ? ' on' : '')} onClick={() => onGroup && onGroup(g, !gOn)} aria-pressed={gOn} aria-label={name + (gOn ? '要念' : '不念')} />
+              </div>
+            )
+          })}
+          <div className="rv-row">
+            <span className="n">日程提前</span>
+            <span className="rh-inline">
+              <button type="button" className="rv-btn sm" onClick={() => onLead && onLead(-1)} aria-label="少一分钟">−</button>
+              <span className="rv-num">{v.leadMin || 0} 分钟</span>
+              <button type="button" className="rv-btn sm" onClick={() => onLead && onLead(1)} aria-label="多一分钟">+</button>
+            </span>
+          </div>
+          <p className="rv-note">待办按你说的钟点念；日程在开始前这个分钟数念，0 就是到点念。深夜 23:30–07:30 只静音生活琐事，待办和日程照念。</p>
 
           {msg ? <div className="rv-warn">{msg}</div> : null}
           {!ready ? <div className="rv-warn">{provider === 'cloud' ? '还差地址或密钥，现在点了也念不出来。' : '还差服务地址。'}</div> : null}

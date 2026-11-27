@@ -636,9 +636,34 @@ export default function LifeApp() {
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis) }
   }, [pushRoutine])
 
-  const reminderDone = (a) => { setReminders((r) => r.filter((x) => x.id !== a.id)); logRoutine(a.kind || 'custom'); pushRoutine({ action: 'ack', ids: [a.id] }) }
+  // 待办和日程的时间点交给主机，到点才提醒得到（签名不变就不重复推）
+  const planSig = useRef('')
+  useEffect(() => {
+    const t = Date.now()
+    const items = []
+    for (const r of db.records) {
+      if (r.type === 'todo' && !r.done && r.remindAt > t - 60000) items.push({ id: r.id, type: 'todo', title: r.title, at: r.remindAt })
+      else if (r.type === 'event' && !r.done && r.t > t - 3600000 && r.t < t + 14 * 86400000) items.push({ id: r.id, type: 'event', title: r.title, at: r.t })
+    }
+    const sig = items.map((x) => x.id + '@' + x.at).join('|')
+    if (sig === planSig.current) return
+    planSig.current = sig
+    pushRoutine({ action: 'plans', items })
+  }, [db.records, pushRoutine])
+
+  const doneInDb = (id) => setDb((d) => ({ ...d, records: d.records.map((r) => (r.id === id ? { ...r, done: true, doneAt: Date.now() } : r)) }))
+  const reminderDone = (a) => {
+    setReminders((r) => r.filter((x) => x.id !== a.id))
+    if (a.srcId && (a.kind === 'todo' || a.kind === 'event')) doneInDb(a.srcId)
+    else logRoutine(a.kind || 'custom')
+    pushRoutine({ action: 'ack', ids: [a.id] })
+  }
   const reminderSnooze = (a, m) => { setReminders((r) => r.filter((x) => x.id !== a.id)); pushRoutine({ action: 'snooze', ids: [a.id], minutes: m }) }
-  const reminderSkip = (a) => { setReminders((r) => r.filter((x) => x.id !== a.id)); pushRoutine({ action: 'ack', ids: [a.id] }) }
+  const reminderSkip = (a) => {
+    setReminders((r) => r.filter((x) => x.id !== a.id))
+    if (a.srcId && (a.kind === 'todo' || a.kind === 'event')) doneInDb(a.srcId)
+    pushRoutine({ action: 'ack', ids: [a.id] })
+  }
 
   // ===== 说一句：是记一笔，还是让我排一天 =====
   const wantsPlan = (s) => /(安排|排一下|排下|排个|计划|规划|时间表|怎么过|帮我排|做个日程)/.test(s)
@@ -1109,6 +1134,10 @@ export default function LifeApp() {
                   <button type="submit" className="lf-send" disabled={!text.trim() || busy} aria-label="记下">{busy ? <span className="lf-spin" /> : Icon.send}</button>
                 </form>
                 <GoalsButton goals={goals} suggestions={suggestions} onClick={openGoals} />
+                <button type="button" className="gl-entry" onClick={() => setVoiceOpen(true)} aria-label="语音设置" data-tip="念不念、用哪个声音">
+                  <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>🔊</span>
+                  <span>语音</span>
+                </button>
                 </div>
                 <div className="lf-below" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 10, minHeight: 100, marginTop: -12 }}>
                   {text.trim() && !settled ? (
@@ -1206,8 +1235,8 @@ export default function LifeApp() {
           <NextCard P={P} S={S} onDone={doneEvent} />
 
           {/* 日常：喝水、洗澡、洗头 */}
-          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} onOpenVoice={() => setVoiceOpen(true)} />}>
-            <RoutineCard ctx={{ S, rules, onLog: logRoutine, next: reminderNext, voice, onSay: sayRoutine, onOpenVoice: () => setVoiceOpen(true) }} />
+          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} />}>
+            <RoutineCard ctx={{ S, rules, onLog: logRoutine, next: reminderNext, voice, onSay: sayRoutine }} />
             {coachLines[0] ? <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink2)' }}>AI · {coachLines[0]}</div> : null}
           </Card>
 
@@ -1413,7 +1442,9 @@ export default function LifeApp() {
         onAccept={acceptPlan} onReplan={(c) => openPlan(plan.text, c)} />
       <VoicePanel open={voiceOpen} voice={voice ? { ...voice, ffplay: voiceMeta.ffplay, cache: voiceMeta.cache } : null}
         onClose={() => setVoiceOpen(false)} onSave={voiceSet} onTest={voiceTest}
-        onToggleRead={(k, on) => voiceSet({ read: { [k]: on } })} />
+        onToggleRead={(k, on) => voiceSet({ read: { [k]: on } })}
+        onGroup={(g, on) => voiceSet({ groups: { [g]: on } })}
+        onLead={(d) => voiceSet({ leadMin: Math.max(0, Math.min(60, Number(voice && voice.leadMin) || 0) + d) })} />
       <ReminderStack items={reminders} onDone={reminderDone} onSnooze={reminderSnooze} onSkip={reminderSkip} />
       {bursts.map((b) => (
         <div key={b.id} aria-hidden="true" style={{ position: 'fixed', left: b.x, top: b.y, width: 0, height: 0, zIndex: 40, pointerEvents: 'none' }}>

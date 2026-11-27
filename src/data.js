@@ -208,7 +208,10 @@ export function parse(input, now = Date.now(), mine = {}) {
   const todo = text.match(/^(?:待办|记得|提醒我|别忘了|要)\s*(.+)$/)
   if (todo) {
     const body = todo[1].replace(/[¥￥]?\s?\d+(\.\d+)?\s?(元|块)?/, '').trim()
-    out.records.push({ id: uid(), type: 'todo', t: now, title: body, amount: amount || null, cat: amount ? catOf(body) : null, done: false })
+    // 句子里点了钟点（「提醒我 21:30 交稿」）就带上提醒时刻，过了就顺到明天
+    const rt = clock ? clockAt(9) : null
+    const remindAt = rt != null && rt > now - 60000 ? (rt < now - 60000 ? rt + DAY : rt) : null
+    out.records.push({ id: uid(), type: 'todo', t: now, title: body, amount: amount || null, cat: amount ? catOf(body) : null, done: false, ...(remindAt ? { remindAt } : {}) })
     mark(todo[0].slice(0, todo[0].length - todo[1].length).trim(), 'time'); if (amountStr) mark(amountStr, 'money')
     out.effects.add('time'); if (amount) out.effects.add('money')
     return out
@@ -613,7 +616,10 @@ export function fromAI(res, input, now = Date.now()) {
       out.records.push({ id: uid(), type: 'event', t, end: end > t ? end : t + 3600000, title: String(r.title).slice(0, 40), domain, ...(domain === 'move' ? { minutes: minutes || Math.round((end - t) / 60000), kcal: Math.round(nOr(r.kcal, 400)) } : {}), ai: true })
     } else if (r.type === 'todo' && r.title) {
       const amount = nOr(r.amount, null)
-      out.records.push({ id: uid(), type: 'todo', t: now, title: String(r.title).slice(0, 40), amount: amount && amount > 0 ? amount : null, cat: amount ? catOf(String(r.title)) : null, done: false, ai: true })
+      // 说了钟点就带一个提醒时刻，主机到点才会念
+      const rm = /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})/.exec(String(r.remind || ''))
+      const remindAt = rm ? new Date(+rm[1], +rm[2] - 1, +rm[3], +rm[4], +rm[5], 0, 0).getTime() : null
+      out.records.push({ id: uid(), type: 'todo', t: now, title: String(r.title).slice(0, 40), amount: amount && amount > 0 ? amount : null, cat: amount ? catOf(String(r.title)) : null, done: false, ...(remindAt && remindAt > now - 60000 ? { remindAt } : {}), ai: true })
     }
   }
   // 吃的和它的花销连在一起

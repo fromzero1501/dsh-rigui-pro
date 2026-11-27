@@ -72,7 +72,7 @@ function Chip({ kind, voice, onSay, onLog, done, title, children }) {
 }
 
 export function RoutineCard({ ctx }) {
-  const { S, rules, onLog, next, voice, onSay, onOpenVoice } = ctx
+  const { S, rules, onLog, next, voice, onSay } = ctx
   const water = (S.routines && S.routines.today && S.routines.today.water) || { count: 0, ml: 0, lastAt: 0 }
   const shower = (S.routines && S.routines.today && S.routines.today.shower) || null
   const hair = (S.routines && S.routines.last && S.routines.last.hair) || null
@@ -113,14 +113,13 @@ export function RoutineCard({ ctx }) {
       </div>
       <div className="rh-foot">
         <p className="rh-note">喇叭亮着就会念；点一下先听，再点一下这件事就不念。</p>
-        <button type="button" className="rh-open" onClick={onOpenVoice}>🔊 语音设置</button>
       </div>
     </>
   )
 }
 
-// 背面只剩提醒节奏；语音那套搬到独立面板（src/voice.jsx），卡面底部的按钮打开。
-export function BackRoutine({ rules, onToggle, onEvery, onGap, onOpenVoice }) {
+// 背面只剩提醒节奏；语音那套搬到独立面板（src/voice.jsx），入口在页面顶部。
+export function BackRoutine({ rules, onToggle, onEvery, onGap }) {
   return (
     <>
       <style>{CSS}</style>
@@ -148,11 +147,7 @@ export function BackRoutine({ rules, onToggle, onEvery, onGap, onOpenVoice }) {
           </div>
         ))}
       </div>
-      <p className="rh-note">点一下就记下，记完自动顺延；面板关着也会弹系统提醒。</p>
-      <div className="rh-foot">
-        <p className="rh-note">念不念、用哪个声音，都在语音设置里。</p>
-        <button type="button" className="rh-open" onClick={onOpenVoice}>🔊 语音设置</button>
-      </div>
+      <p className="rh-note">点一下就记下，记完自动顺延；面板关着也会弹系统提醒。待办和日程到点同样会提醒。</p>
     </>
   )
 }

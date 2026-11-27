@@ -37,7 +37,8 @@ const PARSE_SYSTEM = `你是「日晷」生活记录工具的解析器。把用�
   · amount 只对喝水有意义，单位毫升；用户说「一杯」按 250，「一大杯」按 500，没说就 null。
   · 洗澡用 shower，洗头用 hair，两个都说了就两条记录。
 - 日程（以后要做的、有时间的事）：{"type":"event","title":"…","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM"|null,"domain":"move|time","minutes":60|null,"kcal":数字|null}
-- 待办（没有具体时间的事）：{"type":"todo","title":"…","amount":数字|null}
+- 待办（没有具体时段、但要做的事）：{"type":"todo","title":"…","amount":数字|null,"remind":"YYYY-MM-DD HH:MM"|null}
+  · 用户给了明确的钟点（「九点提醒我交稿」「明天下午三点寄快递」「晚上八点」）就把那个时刻填进 remind；没给钟点就填 null。填了就会按这个时间提醒他。
 
 规则：
 - 吃东西又说了价钱：一条 meal 加一条 expense（cat 用 餐饮，title 用吃的东西）。
@@ -102,7 +103,7 @@ const DEFAULT_RULES = [
   { id: 'sleep', kind: 'sleep', title: '该睡了', mode: 'fixed', times: ['23:30'], enabled: true },
 ]
 
-const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0, voice: voiceDefaults() })
+const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], plans: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0, voice: voiceDefaults() })
 
 function readStore() {
   try {
@@ -112,6 +113,7 @@ function readStore() {
     if (!Array.isArray(s.rules) || !s.rules.length) s.rules = EMPTY().rules
     if (!Array.isArray(s.logs)) s.logs = []
     if (!Array.isArray(s.alarms)) s.alarms = []
+    if (!Array.isArray(s.plans)) s.plans = []
     if (!s.fired || typeof s.fired !== 'object') s.fired = {}
     s.prefs = { quiet: { from: '23:30', to: '07:30' }, system: true, ...(s.prefs || {}) }
     return s
@@ -159,6 +161,9 @@ const PHRASES = {
   teeth: ['刷牙去。', '别忘了刷牙。'],
   stretch: ['站起来动一动。', '脖子手腕转一转。'],
   custom: ['到点了。', '该做这件事了。'],
+  // 待办与日程念的是「事情标题 + 这几句后缀」，不做逐条生成
+  todo: ['到点了，别拖。', '该去做这件事了。', '时间到了，先做这个。'],
+  event: ['该开始了。', '到点了，准备一下。', '这件事该上了。'],
 }
 
 function voiceDefaults() {
@@ -166,6 +171,8 @@ function voiceDefaults() {
     enabled: true,
     provider: 'cloud',
     read: { water: true, shower: true, hair: true, meal: true, sleep: true, teeth: true, stretch: true, custom: true },
+    groups: { routine: true, todo: true, event: true },
+    leadMin: 5,
     cloud: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini-tts', voice: 'alloy', format: 'mp3' },
     local: { shape: 'gradio', baseUrl: 'http://127.0.0.1:7860', apiName: 'gen_single', voicePath: '', format: 'wav', payload: '' },
     lastAt: 0,
@@ -181,6 +188,7 @@ function readVoice(store) {
     ...d,
     ...raw,
     read: { ...d.read, ...(raw.read || {}) },
+    groups: { ...d.groups, ...(raw.groups || {}) },
     cloud: { ...d.cloud, ...(raw.cloud || {}) },
     local: { ...d.local, ...(raw.local || {}) },
   }
@@ -192,7 +200,7 @@ const VOICE_FIELDS = {
 }
 
 function mergeVoice(v, patch) {
-  const out = { ...v, read: { ...v.read }, cloud: { ...v.cloud }, local: { ...v.local } }
+  const out = { ...v, read: { ...v.read }, groups: { ...v.groups }, cloud: { ...v.cloud }, local: { ...v.local } }
   if (!patch || typeof patch !== 'object') return out
   if (typeof patch.enabled === 'boolean') out.enabled = patch.enabled
   if (patch.provider === 'cloud' || patch.provider === 'local') out.provider = patch.provider
@@ -201,6 +209,12 @@ function mergeVoice(v, patch) {
       if (typeof patch.read[k] === 'boolean') out.read[String(k).slice(0, 16)] = patch.read[k]
     }
   }
+  if (patch.groups && typeof patch.groups === 'object') {
+    for (const g of ['routine', 'todo', 'event']) {
+      if (typeof patch.groups[g] === 'boolean') out.groups[g] = patch.groups[g]
+    }
+  }
+  if (isFinite(+patch.leadMin)) out.leadMin = Math.max(0, Math.min(60, Math.round(+patch.leadMin)))
   for (const group of ['cloud', 'local']) {
     const p = patch[group]
     if (!p || typeof p !== 'object') continue
@@ -471,6 +485,23 @@ function tick(s, now) {
     s.alarms.push({ id: 'a' + now.toString(36) + Math.random().toString(36).slice(2, 5), ruleId: rule.id, kind: rule.kind, title: rule.title, body, at, firedAt: now, seenAt: 0 })
     created.push({ title: rule.title, body })
   }
+  // 待办与日程：到点（日程按 leadMin 提前）也要提醒；不睡免打扰，因为本来就是你排在那个点的
+  const lead = Math.max(0, Math.min(60, Math.round(Number(readVoice(s).leadMin) || 0))) * 60000
+  for (const it of s.plans || []) {
+    if (!it || !isFinite(+it.at)) continue
+    const fireAt = it.type === 'event' ? +it.at - lead : +it.at
+    if (now < fireAt) continue
+    if (now - fireAt > 30 * 60000) continue
+    const k = 'p' + it.id + '@' + fireAt
+    if (s.fired[k]) continue
+    s.fired[k] = now
+    const title = String(it.title || (it.type === 'event' ? '日程' : '待办')).slice(0, 60)
+    const body = it.type === 'event'
+      ? `${hhmm(new Date(+it.at))} 开始，${lead ? '还有 ' + lead / 60000 + ' 分钟' : '现在该开始了'}`
+      : `${hhmm(new Date(+it.at))} 到点，该做了`
+    s.alarms.push({ id: 'a' + now.toString(36) + Math.random().toString(36).slice(2, 5), ruleId: 'plan:' + it.id, srcId: it.id, kind: it.type === 'event' ? 'event' : 'todo', title, body, at: fireAt, planAt: +it.at, firedAt: now, seenAt: 0 })
+    created.push({ title, body })
+  }
   if (s.alarms.length > 60) s.alarms = s.alarms.slice(-60)
   // 清掉太老的 fired 记录
   const keys = Object.keys(s.fired)
@@ -644,15 +675,22 @@ export function apply(ctx) {
           const one = created[0]
           notify(one.title, created.length > 1 ? `${one.body}（另有 ${created.length - 1} 条）` : one.body)
         }
-        // 到点念一句：免打扰时段不念，单条被关掉的也不念
+        // 到点念一句：生活琐事在免打扰时段不念；待办和日程照念
         const v = readVoice(store)
         const last = store.alarms[store.alarms.length - 1]
-        if (v.enabled && last && v.read[last.kind] !== false && !inQuiet(store, now)) {
-          speakNow(v, phraseFor(store, last.kind, now)).catch((e) => {
-            v.lastError = String((e && e.message) || e).slice(0, 200)
-            store.voice = v
-            save()
-          })
+        if (v.enabled && last && v.read[last.kind] !== false) {
+          const grp = last.kind === 'todo' ? 'todo' : last.kind === 'event' ? 'event' : 'routine'
+          const quietBlocked = grp === 'routine' && inQuiet(store, now)
+          if (!quietBlocked && v.groups[grp] !== false) {
+            const said = grp === 'routine'
+              ? phraseFor(store, last.kind, now)
+              : String(last.title || '').slice(0, 60) + '，' + phraseFor(store, grp, now)
+            speakNow(v, said).catch((e) => {
+              v.lastError = String((e && e.message) || e).slice(0, 200)
+              store.voice = v
+              save()
+            })
+          }
         }
       }
     } catch (e) { console.warn('[dsh-rigui-pro] 提醒轮询出错', e && e.message) }
@@ -668,11 +706,19 @@ export function apply(ctx) {
   function statePayload(now) {
     const due = store.alarms.filter((a) => !a.seenAt && a.at <= now + 1000)
     const next = store.rules.map((r) => ({ id: r.id, kind: r.kind, title: r.title, at: nextAt(r, store, now) })).filter((r) => r.at)
+    const lead = Math.max(0, Math.min(60, Math.round(Number(readVoice(store).leadMin) || 0))) * 60000
+    for (const it of store.plans || []) {
+      if (!isFinite(+it.at)) continue
+      const fireAt = it.type === 'event' ? +it.at - lead : +it.at
+      if (fireAt <= now || fireAt > now + DAY) continue
+      next.push({ id: 'plan:' + it.id, kind: it.type === 'event' ? 'event' : 'todo', title: it.title, at: fireAt })
+    }
+    next.sort((a, b) => a.at - b.at)
     return {
       now,
       rules: store.rules,
-      due: due.map((a) => ({ id: a.id, ruleId: a.ruleId, kind: a.kind, title: a.title, body: a.body, at: a.at })),
-      next,
+      due: due.map((a) => ({ id: a.id, ruleId: a.ruleId, srcId: a.srcId || '', kind: a.kind, title: a.title, body: a.body, at: a.at })),
+      next: next.slice(0, 6),
       today: {},
       voice: readVoice(store),
     }
@@ -738,6 +784,20 @@ export function apply(ctx) {
           }))
           save()
         }
+        return { ok: true, result: statePayload(now) }
+      }
+      if (action === 'plans') {
+        const items = Array.isArray(p.items) ? p.items.slice(0, 400) : []
+        store.plans = items
+          .filter((x) => x && x.title && isFinite(+x.at) && +x.at > now - 3600000)
+          .map((x) => ({
+            id: String(x.id || '').slice(0, 48) || 'p' + Math.random().toString(36).slice(2, 8),
+            type: x.type === 'event' ? 'event' : 'todo',
+            title: String(x.title).slice(0, 60),
+            at: +x.at,
+          }))
+          .slice(0, 300)
+        save()
         return { ok: true, result: statePayload(now) }
       }
       if (action === 'log') {
