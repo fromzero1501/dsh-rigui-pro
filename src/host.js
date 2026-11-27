@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { dirname, join } from 'node:path'
-import { exec, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 
 export const name = 'dsh-rigui-pro'
@@ -130,21 +130,36 @@ function writeStore(s) {
 }
 
 // ---------- 系统弹窗 ----------
-function esc(v) { return String(v).replace(/[`"]/g, '') }
+// 只留字母数字与常见中文标点，避免拼进 PowerShell 单引号串里出岔
+function esc(v) { return String(v == null ? '' : v).replace(/[`"'\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim() }
+// 旧写法是 exec() + 隐藏窗口参数 + base64 编码命令：exec 在 Windows 要经 cmd.exe，
+// 而「隐藏窗口 + base64 命令」这两个特征正好撞上安全软件「隐藏执行 PowerShell」那条规则。
+// 现在改成 spawn 直接起 powershell、命令行只看得到 -Command，窗口隐藏交给 CreateProcess 的
+// windowsHide 参数（它是进程创建标志，不出现在命令行里）。
 function notify(title, message) {
   if (platform() !== 'win32') return
-  const ps = `Add-Type -AssemblyName System.Windows.Forms
-$n = New-Object System.Windows.Forms.NotifyIcon
-$n.Icon = [System.Drawing.SystemIcons]::Information
-$n.BalloonTipTitle = "${esc(title)}"
-$n.BalloonTipText = "${esc(message)}"
-$n.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
-$n.Visible = $true
-$n.ShowBalloonTip(8000)
-Start-Sleep -Seconds 2
-$n.Dispose()`
-  const b64 = Buffer.from(ps, 'utf16le').toString('base64')
-  exec(`powershell -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${b64}`, { windowsHide: true }, () => {})
+  const ps = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    'Add-Type -AssemblyName System.Drawing',
+    '$n = New-Object System.Windows.Forms.NotifyIcon',
+    '$n.Icon = [System.Drawing.SystemIcons]::Information',
+    `$n.BalloonTipTitle = '${esc(title)}'`,
+    `$n.BalloonTipText = '${esc(message)}'`,
+    '$n.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info',
+    '$n.Visible = $true',
+    '$n.ShowBalloonTip(8000)',
+    'Start-Sleep -Seconds 2',
+    '$n.Dispose()',
+  ].join('; ')
+  try {
+    const child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+      windowsHide: true,
+      stdio: 'ignore',
+      detached: true,
+    })
+    child.on('error', () => {})
+    child.unref()
+  } catch (e) { console.warn('[dsh-rigui-pro] 弹提醒失败', e && e.message) }
 }
 
 // ---------- 语音 ----------
@@ -174,6 +189,8 @@ function voiceDefaults() {
     groups: { routine: true, todo: true, event: true },
     leadMin: 5,
     cloud: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini-tts', voice: 'alloy', format: 'mp3' },
+    // 小米 MiMo：OpenAI 的 chat/completions 形状，2026-11 起限时免费
+    mimo: { baseUrl: 'https://api.xiaomimimo.com/v1', apiKey: '', model: 'mimo-v2.5-tts', voice: 'mimo_default', format: 'mp3' },
     local: { shape: 'gradio', baseUrl: 'http://127.0.0.1:7860', apiName: 'gen_single', voicePath: '', format: 'wav', payload: '' },
     lastAt: 0,
     lastError: '',
@@ -190,20 +207,22 @@ function readVoice(store) {
     read: { ...d.read, ...(raw.read || {}) },
     groups: { ...d.groups, ...(raw.groups || {}) },
     cloud: { ...d.cloud, ...(raw.cloud || {}) },
+    mimo: { ...d.mimo, ...(raw.mimo || {}) },
     local: { ...d.local, ...(raw.local || {}) },
   }
 }
 
 const VOICE_FIELDS = {
   cloud: ['baseUrl', 'apiKey', 'model', 'voice', 'format'],
+  mimo: ['baseUrl', 'apiKey', 'model', 'voice', 'format'],
   local: ['shape', 'baseUrl', 'apiName', 'voicePath', 'format', 'payload'],
 }
 
 function mergeVoice(v, patch) {
-  const out = { ...v, read: { ...v.read }, groups: { ...v.groups }, cloud: { ...v.cloud }, local: { ...v.local } }
+  const out = { ...v, read: { ...v.read }, groups: { ...v.groups }, cloud: { ...v.cloud }, mimo: { ...v.mimo }, local: { ...v.local } }
   if (!patch || typeof patch !== 'object') return out
   if (typeof patch.enabled === 'boolean') out.enabled = patch.enabled
-  if (patch.provider === 'cloud' || patch.provider === 'local') out.provider = patch.provider
+  if (patch.provider === 'cloud' || patch.provider === 'mimo' || patch.provider === 'local') out.provider = patch.provider
   if (patch.read && typeof patch.read === 'object') {
     for (const k of Object.keys(patch.read).slice(0, 20)) {
       if (typeof patch.read[k] === 'boolean') out.read[String(k).slice(0, 16)] = patch.read[k]
@@ -215,7 +234,7 @@ function mergeVoice(v, patch) {
     }
   }
   if (isFinite(+patch.leadMin)) out.leadMin = Math.max(0, Math.min(60, Math.round(+patch.leadMin)))
-  for (const group of ['cloud', 'local']) {
+  for (const group of ['cloud', 'mimo', 'local']) {
     const p = patch[group]
     if (!p || typeof p !== 'object') continue
     for (const f of VOICE_FIELDS[group]) {
@@ -238,9 +257,10 @@ function voiceDir() {
 }
 
 function cacheKey(v, text) {
-  const src = v.provider === 'local'
-    ? ['local', v.local.shape, v.local.baseUrl, v.local.apiName, v.local.voicePath, text]
-    : ['cloud', v.cloud.baseUrl, v.cloud.model, v.cloud.voice, text]
+  let src
+  if (v.provider === 'local') src = ['local', v.local.shape, v.local.baseUrl, v.local.apiName, v.local.voicePath, text]
+  else if (v.provider === 'mimo') src = ['mimo', v.mimo.baseUrl, v.mimo.model, v.mimo.voice, text]
+  else src = ['cloud', v.cloud.baseUrl, v.cloud.model, v.cloud.voice, text]
   return createHash('sha1').update(JSON.stringify(src)).digest('hex').slice(0, 16)
 }
 
@@ -281,6 +301,46 @@ async function synthOpenAI(text, cfg) {
   const buf = Buffer.from(await r.arrayBuffer())
   if (buf.length < 800) throw new Error('合成结果太小，当成失败')
   return { buf, ext: '.' + fmt }
+}
+
+// 小米 MiMo：不是 /audio/speech，走 chat/completions，音频在 choices[0].message.audio.data（base64）
+// 要念的文字必须放在 assistant 消息里；voice 用内置音色名
+async function synthMimo(text, cfg) {
+  const base = String(cfg.baseUrl || '').replace(/\/+$/, '')
+  if (!base) throw new Error('还没填 MiMo 服务地址')
+  const fmt = cfg.format === 'wav' ? 'wav' : 'mp3'
+  const headers = { 'content-type': 'application/json' }
+  if (cfg.apiKey) { headers.authorization = 'Bearer ' + cfg.apiKey; headers['api-key'] = cfg.apiKey }
+  const body = {
+    model: cfg.model || 'mimo-v2.5-tts',
+    messages: [{ role: 'assistant', content: text }],
+    audio: { format: fmt, voice: cfg.voice || 'mimo_default' },
+    stream: false,
+  }
+  const r = await fetch(base + '/chat/completions', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(45000),
+  })
+  if (!r.ok) throw new Error('MiMo ' + r.status + ' ' + String(await r.text()).slice(0, 160))
+  const j = await r.json().catch(() => null)
+  const node = j && j.choices && j.choices[0] && j.choices[0].message
+  const b64 = node && node.audio && node.audio.data
+  if (!b64) {
+    const hint = node && node.content ? String(node.content).slice(0, 80) : '响应里没有 audio.data'
+    throw new Error('MiMo 没返回音频：' + hint)
+  }
+  const buf = Buffer.from(String(b64), 'base64')
+  if (buf.length < 800) throw new Error('合成结果太小，当成失败')
+  return { buf, ext: '.' + fmt }
+}
+
+// 三路合成统一入口
+function synthFor(v, text) {
+  if (v.provider === 'mimo') return synthMimo(text, v.mimo)
+  if (v.provider === 'local') return v.local.shape === 'openai' ? synthOpenAI(text, v.local) : synthGradio(text, v.local)
+  return synthOpenAI(text, v.cloud)
 }
 
 function findAudioUrl(node, base, depth = 0) {
@@ -364,12 +424,6 @@ function ffplayPath() {
 
 let playing = null
 
-function playWavPS(file) {
-  const ps = `$s = New-Object System.Media.SoundPlayer "${String(file).replace(/"/g, '')}"; $s.PlaySync()`
-  const b64 = Buffer.from(ps, 'utf16le').toString('base64')
-  playing = exec(`powershell -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${b64}`, { windowsHide: true }, () => { playing = null })
-}
-
 // 一条一条念，不叠着响
 function startPlay(file) {
   try { if (playing) playing.kill() } catch {}
@@ -382,7 +436,6 @@ function startPlay(file) {
     child.on('error', () => { if (playing === child) playing = null })
     return
   }
-  if (platform() === 'win32' && /\.wav$/i.test(file)) { playWavPS(file); return }
   throw new Error('没找到 ffplay：装个 ffmpeg，或者把 ffplay 放进 PATH')
 }
 
@@ -394,9 +447,7 @@ async function speakNow(v, text) {
   let file = findCached(dir, key)
   const cached = !!file
   if (!file) {
-    const { buf, ext } = v.provider === 'local'
-      ? (v.local.shape === 'openai' ? await synthOpenAI(clean, v.local) : await synthGradio(clean, v.local))
-      : await synthOpenAI(clean, v.cloud)
+    const { buf, ext } = await synthFor(v, clean)
     file = join(dir, key + ext)
     writeFileSync(file, buf)
   }

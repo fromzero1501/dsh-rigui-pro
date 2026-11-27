@@ -45,8 +45,11 @@ const GROUPS = [['routine', '日常琐事'], ['todo', '待办'], ['event', '日�
 
 const blank = (v) => ({
   cloud: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini-tts', voice: 'alloy', format: 'mp3', ...((v && v.cloud) || {}) },
+  mimo: { baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-tts', voice: 'mimo_default', format: 'mp3', ...((v && v.mimo) || {}) },
   local: { shape: 'gradio', baseUrl: 'http://127.0.0.1:7860', apiName: 'gen_single', format: 'wav', ...((v && v.local) || {}) },
 })
+
+const MIMO_VOICES = ['mimo_default', '冰糖', '茉莉', '苏打', '白桦', 'Mia', 'Chloe', 'Milo', 'Dean']
 
 export default function VoicePanel({ open, voice, onClose, onSave, onTest, onToggleRead, onGroup, onLead }) {
   const v = voice || {}
@@ -64,10 +67,11 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
   }, [open, onClose])
 
   const enabled = !!v.enabled
-  const provider = v.provider === 'local' ? 'local' : 'cloud'
+  const provider = v.provider === 'local' ? 'local' : (v.provider === 'mimo' ? 'mimo' : 'cloud')
   const localShape = d.local.shape || 'gradio'
   const ready = useMemo(() => {
     if (provider === 'cloud') return !!(d.cloud.baseUrl && d.cloud.apiKey)
+    if (provider === 'mimo') return !!(d.mimo.baseUrl && d.mimo.apiKey)
     return !!d.local.baseUrl
   }, [provider, d])
 
@@ -78,7 +82,7 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
   const save = async () => {
     setBusy(true); setMsg('')
     try {
-      const r = onSave ? await onSave({ provider, cloud: d.cloud, local: d.local }) : null
+      const r = onSave ? await onSave({ provider, cloud: d.cloud, mimo: d.mimo, local: d.local }) : null
       setMsg(!r || r.ok === false ? '没存上：' + ((r && r.error) || '主机没回应') : '存好了')
     } finally { setBusy(false) }
   }
@@ -90,8 +94,8 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
       <div className="rv-scrim" onClick={onClose} aria-hidden="true" />
       <div className="rv-wrap" role="dialog" aria-modal="true" aria-label="语音设置">
         <div className="rv-head">
-          <div className="rv-title">语音<small>{enabled ? (provider === 'cloud' ? '云端在念' : '本地在念') : '现在不念，只弹提醒'}</small></div>
-          <div className="rv-sum">到点会把这句话念出来：云端走 OpenAI 兼容的 /audio/speech，本地走 IndexTTS 的 Gradio 接口。念过的句子会缓存，下次直接播。</div>
+          <div className="rv-title">语音<small>{!enabled ? '现在不念，只弹提醒' : provider === 'cloud' ? '云端在念' : provider === 'mimo' ? 'MiMo 在念' : '本地在念'}</small></div>
+          <div className="rv-sum">到点会把这句话念出来：云端走 OpenAI 兼容的 /audio/speech，MiMo 走 chat/completions（限时免费），本地走 IndexTTS 的 Gradio 接口。念过的句子会缓存，下次直接播。</div>
         </div>
 
         <div className="rv-body">
@@ -101,11 +105,12 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
             <span style={{ flex: 1 }} />
             <span className="rv-seg">
               <button type="button" className={provider === 'cloud' ? 'on' : ''} onClick={() => flip({ provider: 'cloud' })}>云端</button>
+              <button type="button" className={provider === 'mimo' ? 'on' : ''} onClick={() => flip({ provider: 'mimo' })}>MiMo</button>
               <button type="button" className={provider === 'local' ? 'on' : ''} onClick={() => flip({ provider: 'local' })}>本地</button>
             </span>
           </div>
 
-          <div className="rv-sub">{provider === 'cloud' ? '云端 TTS' : '本地 TTS'}</div>
+          <div className="rv-sub">{provider === 'cloud' ? '云端 TTS' : provider === 'mimo' ? '小米 MiMo（限时免费）' : '本地 TTS'}</div>
           {provider === 'cloud' ? (
             <>
               <div className="rv-row"><span className="n">地址</span><input className="rv-in" value={d.cloud.baseUrl || ''} onChange={(e) => setField('cloud', 'baseUrl', e.target.value)} placeholder="https://api.openai.com/v1" /></div>
@@ -120,6 +125,21 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
                 </span>
               </div>
               <p className="rv-note">任何 OpenAI 兼容的语音接口都行（SiliconFlow、Azure 代理、自建网关）：把地址换成它的 /v1，模型和音色按它的文档填。</p>
+            </>
+          ) : provider === 'mimo' ? (
+            <>
+              <div className="rv-row"><span className="n">地址</span><input className="rv-in" value={d.mimo.baseUrl || ''} onChange={(e) => setField('mimo', 'baseUrl', e.target.value)} placeholder="https://api.xiaomimimo.com/v1" /></div>
+              <div className="rv-row"><span className="n">密钥</span><input className="rv-in" value={d.mimo.apiKey || ''} onChange={(e) => setField('mimo', 'apiKey', e.target.value)} placeholder="MiMo 的 API Key（明文存在本机 rigui-pro.json）" /></div>
+              <div className="rv-row"><span className="n">模型</span><input className="rv-in" value={d.mimo.model || ''} onChange={(e) => setField('mimo', 'model', e.target.value)} placeholder="mimo-v2.5-tts" /></div>
+              <div className="rv-row"><span className="n">音色</span><input className="rv-in" value={d.mimo.voice || ''} onChange={(e) => setField('mimo', 'voice', e.target.value)} placeholder={MIMO_VOICES.join(' / ')} /></div>
+              <div className="rv-row"><span className="n">格式</span>
+                <span className="rv-seg">
+                  {['mp3', 'wav'].map((f) => (
+                    <button key={f} type="button" className={(d.mimo.format || 'mp3') === f ? 'on' : ''} onClick={() => setField('mimo', 'format', f)}>{f}</button>
+                  ))}
+                </span>
+              </div>
+              <p className="rv-note">小米 MiMo 的三个语音模型官方标的是限时免费；内置音色 {MIMO_VOICES.length} 个（{MIMO_VOICES.join('、')}），中文那四个是普通话。它走 chat/completions 而不是 /audio/speech，所以单开一路。</p>
             </>
           ) : (
             <>
@@ -179,7 +199,7 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
           <p className="rv-note">待办按你说的钟点念；日程在开始前这个分钟数念，0 就是到点念。深夜 23:30–07:30 只静音生活琐事，待办和日程照念。</p>
 
           {msg ? <div className="rv-warn">{msg}</div> : null}
-          {!ready ? <div className="rv-warn">{provider === 'cloud' ? '还差地址或密钥，现在点了也念不出来。' : '还差服务地址。'}</div> : null}
+          {!ready ? <div className="rv-warn">{provider === 'local' ? '还差服务地址。' : '还差地址或密钥，现在点了也念不出来。'}</div> : null}
           {v.lastError ? <div className="rv-warn">上次出错：{v.lastError}</div> : null}
           <p className="rv-note">
             播放器：{v.ffplay ? 'ffplay 可用' : '没找到 ffplay（非 wav 播不了）'} · 缓存 {v.cache ? v.cache.count : 0} 条 · 深夜 23:30–07:30 不念，只弹提醒。
