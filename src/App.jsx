@@ -9,6 +9,9 @@ import { WeightFog, Private, FOG_CSS } from './fog.jsx'
 import { ReceiptPrinter, RECEIPT_CSS } from './receipt.jsx'
 import { MoneyStrip, SleepSky, useSleepRow, MoveBars, useTaste, WeightScrub, BackEnergy, BackMoney, BackSleep, BackMove, BackBody, CARDS_CSS } from './cards.jsx'
 import { suggestGoals, GoalsPanel, GoalsButton, GOALS_CSS } from './goals.jsx'
+import PlanPanel from './plan.jsx'
+import { RoutineCard, BackRoutine, ReminderStack } from './habits.jsx'
+import { loadRules, saveRules, ruleLine, routineName, guessRoutine, guessWater, sinceLast } from './habits.js'
 
 const KEY = 'dsh-rigui:v1'
 const FOODS_KEY = 'dsh-rigui:foods'
@@ -17,17 +20,22 @@ const loadGoals = () => { try { const g = JSON.parse(localStorage.getItem(GOALS_
 const NUM_KEYS = ['kcal', 'budget', 'sleep', 'workoutsPerWeek', 'weight', 'monthWeight']
 const loadMine = () => { try { return JSON.parse(localStorage.getItem(FOODS_KEY)) || {} } catch (e) { return {} } }
 
-// 让 DSH 里的模型把一句话拆成记录（主机半边的 /api/rigui）
+// 和主机半边说话（/api/rigui-pro）：一个入口，按 endpoint 分发
+async function callHost(endpoint, payload, signal) {
+  const res = await fetch('api/rigui-pro', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint, payload }), signal })
+  if (!res.ok) throw new Error(res.status === 404 ? 'AI 接口还没加载，重启一次 DSH' : '接口出错 ' + res.status)
+  const j = await res.json()
+  if (!j.ok) throw new Error(j.error || '没给出结果')
+  return j
+}
+// 让 DSH 里的模型把一句话拆成记录
 async function askAI(text, mine, weightKg, signal) {
   const d = new Date(), wk = '日一二三四五六'[d.getDay()]
   const nowStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ' 周' + wk
-  const res = await fetch('api/rigui', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint: 'parse', payload: { text, now: nowStr, weightKg, mine } }), signal })
-  if (!res.ok) throw new Error(res.status === 404 ? 'AI 接口还没加载，重启一次 DSH' : 'AI 接口出错 ' + res.status)
-  const j = await res.json()
-  if (!j.ok) throw new Error(j.error || 'AI 没给出结果')
+  const j = await callHost('parse', { text, now: nowStr, weightKg, mine }, signal)
   return { result: j.result, model: j.model }
 }
-const C = { sleep: '#3D4FB8', move: '#1E9E6A', food: '#F2994A', money: '#7C5CE0', body: '#0E8A8A', time: '#1F2328', link: '#E5484D' }
+const C = { sleep: '#3D4FB8', move: '#1E9E6A', food: '#F2994A', money: '#7C5CE0', body: '#0E8A8A', time: '#1F2328', link: '#E5484D', routine: '#3B82C4' }
 
 // 领域 → 哪几张卡会动
 const CARDS_OF = {
@@ -51,11 +59,12 @@ function cardsFor(records, now = Date.now()) {
     if (r.type === 'weight') { c.add('body'); c.add('timeline') }
     if (r.type === 'event') { c.add('week'); c.add('next'); if (today(r.t)) c.add('dial') }
     if (r.type === 'todo') { c.add('todos'); if (r.amount) c.add('money') }
+    if (r.type === 'routine') { c.add('routine'); c.add('timeline') }
   })
   if (records.length) c.add('insights')
   return c
 }
-const CARD_COLOR = { energy: C.food, dial: '#F4F5F1', timeline: C.time, money: C.money, move: C.move, sleep: C.sleep, next: C.move, week: C.time, todos: C.time, body: C.body, insights: C.link }
+const CARD_COLOR = { energy: C.food, dial: '#F4F5F1', timeline: C.time, money: C.money, move: C.move, sleep: C.sleep, next: C.move, week: C.time, todos: C.time, body: C.body, insights: C.link, routine: '#3B82C4' }
 const INSIGHT_CARD = { sleep: 'sleep', move: 'move', food: 'energy', money: 'money', body: 'body', time: 'week' }
 
 function load() {
@@ -176,6 +185,7 @@ const WIDGETS = {
   energy: { name: '今天还能吃', w: 4, h: 2, minW: 3, minH: 2 },
   money: { name: '这个月还能花', w: 4, h: 2, minW: 3, minH: 2 },
   next: { name: '接下来', w: 4, h: 2, minW: 3, minH: 2 },
+  routine: { name: '日常', w: 4, h: 3, minW: 3, minH: 2 },
   timeline: { name: '今天记下的', w: 5, h: 6, minW: 4, minH: 3 },
   sleep: { name: '睡眠', w: 4, h: 3, minW: 3, minH: 3 },
   move: { name: '运动', w: 3, h: 3, minW: 3, minH: 2 },
@@ -331,6 +341,12 @@ export default function LifeApp() {
   const [focusInsight, setFocusInsight] = useState(null)
   const [geo, setGeo] = useState({ w: 0, h: 0 })
   const [toast, setToast] = useState(null)
+  // 规律提醒、AI 排程、AI 建议
+  const [rules, setRules] = useState(loadRules)
+  const [reminders, setReminders] = useState([])
+  const [reminderNext, setReminderNext] = useState([])
+  const [coachLines, setCoachLines] = useState([])
+  const [plan, setPlan] = useState({ open: false, busy: false, draft: null, error: '', date: '', text: '' })
   const rootRef = useRef(null), inputRef = useRef(null), refs = useRef({})
 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
@@ -552,10 +568,120 @@ export default function LifeApp() {
   }, [pathBetween, addFloats])
 
   const say = (msg, ms = 2600) => { setToast(msg); setTimeout(() => setToast((t) => (t === msg ? null : t)), ms) }
+
+  // ===== 规律：记一笔、同步规则、接提醒 =====
+  const pushRoutine = useCallback((payload) => callHost('routine', payload).then((j) => {
+    if (j && j.result) { setReminders(j.result.due || []); setReminderNext(j.result.next || []) }
+    return j
+  }).catch(() => null), [])
+
+  const logRoutine = useCallback((kind, amount) => {
+    const t = Date.now()
+    const ml = kind === 'water' ? (amount || 250) : null
+    const rec = { id: uid(), type: 'routine', kind, t, amount: ml, title: routineName(kind) + (ml ? ' ' + ml + ' ml' : '') }
+    commit([rec], new Set(['routine', 'timeline', 'dial']))
+    say(ml ? '记下了：' + routineName(kind) + ' ' + ml + ' ml' : '记下了：' + routineName(kind))
+    pushRoutine({ action: 'log', kind, at: t, amount: ml })
+  }, [commit, pushRoutine])
+
+  // 规则一动就告诉主机半边，它按这个算下一次提醒
+  useEffect(() => { saveRules(rules); pushRoutine({ action: 'rules', rules }) }, [rules, pushRoutine])
+  // 打开时把最近两周的琐事补上去，主机才知道「上次」是几点
+  useEffect(() => {
+    const since = Date.now() - 14 * 86400000
+    const logs = db.records.filter((r) => r.type === 'routine' && r.t >= since).map((r) => ({ kind: r.kind, at: r.t, amount: r.amount || null }))
+    if (logs.length) pushRoutine({ action: 'logs', logs })
+  }, [])
+  // 每 25 秒问一次有没有到点该提醒的
+  useEffect(() => {
+    const tick = () => pushRoutine({ action: 'state' })
+    tick()
+    const iv = setInterval(tick, 25000)
+    const onVis = () => { if (!document.hidden) tick() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis) }
+  }, [pushRoutine])
+
+  const reminderDone = (a) => { setReminders((r) => r.filter((x) => x.id !== a.id)); logRoutine(a.kind || 'custom'); pushRoutine({ action: 'ack', ids: [a.id] }) }
+  const reminderSnooze = (a, m) => { setReminders((r) => r.filter((x) => x.id !== a.id)); pushRoutine({ action: 'snooze', ids: [a.id], minutes: m }) }
+  const reminderSkip = (a) => { setReminders((r) => r.filter((x) => x.id !== a.id)); pushRoutine({ action: 'ack', ids: [a.id] }) }
+
+  // ===== 说一句：是记一笔，还是让我排一天 =====
+  const wantsPlan = (s) => /(安排|排一下|排下|排个|计划|规划|时间表|怎么过|帮我排|做个日程)/.test(s)
+
+  const planPayload = (text, constraint) => {
+    const d = new Date()
+    const p2 = (n) => String(n).padStart(2, '0')
+    const ymd = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate())
+    const hm = (t) => { const x = new Date(t); return p2(x.getHours()) + ':' + p2(x.getMinutes()) }
+    const w = (() => { try { return JSON.parse(localStorage.getItem('dsh-rigui:weather')) } catch (e) { return null } })()
+    const busy = S.events.filter((e) => e.t >= S.today && e.t < S.today + 86400000)
+      .map((e) => ({ start: hm(e.t), end: hm(e.end || e.t + 3600000), title: e.title }))
+    return {
+      date: ymd, weekday: '日一二三四五六'[d.getDay()],
+      now: ymd + ' ' + hm(Date.now()) + ' 周' + '日一二三四五六'[d.getDay()],
+      text, constraint: constraint || '', busy,
+      todos: S.todos.filter((t) => !t.done).map((t) => ({ title: t.title, amount: t.amount || null })),
+      lastNight: S.lastNight ? S.lastNight.hours : null,
+      goals: { kcal: GOALS.kcal, sleep: GOALS.sleep, workoutsPerWeek: GOALS.workoutsPerWeek },
+      weather: w && w.w ? w.w.temp + '°' + (w.w.rainSoon ? '，一小时内可能下雨' : '') : '',
+      routineLine: ruleLine(rules),
+      profile: '自己做生意的人（直播带货、抖店客服），时间自己安排，不是上班族',
+    }
+  }
+
+  const openPlan = useCallback(async (text, constraint) => {
+    const payload = planPayload(text, constraint)
+    setPlan({ open: true, busy: true, draft: null, error: '', date: payload.date, text })
+    try {
+      const j = await callHost(constraint ? 'replan' : 'plan', payload)
+      setPlan((p) => ({ ...p, busy: false, draft: j.result }))
+    } catch (err) {
+      setPlan((p) => ({ ...p, busy: false, error: String((err && err.message) || err) }))
+    }
+  }, [S, rules])
+
+  const acceptPlan = (blocks) => {
+    const recs = blocks.map((b) => ({ id: uid(), type: 'event', t: b.t, end: b.endT, title: b.title, domain: b.domain === 'move' ? 'move' : 'time', ...(b.domain === 'move' ? { minutes: Math.max(5, Math.round((b.endT - b.t) / 60000)), kcal: 300 } : {}), why: b.why, planned: true, ai: true }))
+    commit(recs, new Set(['week', 'next', 'timeline', 'dial']))
+    setPlan({ open: false, busy: false, draft: null, error: '', date: '', text: '' })
+    say('排好了，' + recs.length + ' 件')
+  }
+
+  // 规则的小调整：开关、喝水间隔、洗头间隔
+  const toggleRule = (id) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, enabled: r.enabled === false } : r)))
+  const bumpEvery = (id, d) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, everyMin: Math.max(15, Math.min(720, (r.everyMin || 90) + d)) } : r)))
+  const bumpGap = (id, d) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, minGapDays: Math.max(1, Math.min(30, (r.minGapDays || 3) + d)) } : r)))
+
+  // ===== AI 建议：一天几次就够，别唠叨 =====
+  useEffect(() => {
+    let alive = true
+    const run = () => {
+      const s = S0.current || {}
+      const d = new Date(), p2 = (n) => String(n).padStart(2, '0')
+      const w = (() => { try { return JSON.parse(localStorage.getItem('dsh-rigui:weather')) } catch (e) { return null } })()
+      const water = sinceLast(db.records, 'water', Date.now())
+      const hair = sinceLast(db.records, 'hair', Date.now())
+      callHost('coach', {
+        now: d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()),
+        kcalIn: s.kcalIn || 0, kcal: GOALS.kcal, spent: s.spent || 0, budget: GOALS.budget,
+        moveMin: s.weekMinutes || 0, lastNight: s.lastNight ? s.lastNight.hours : null,
+        water: water && water.days === 0 ? (s.routines && s.routines.today && s.routines.today.water ? s.routines.today.water.count : null) : 0,
+        hairDays: hair ? hair.days : null,
+        nextEvent: s.next ? s.next.title : '', todoLeft: s.todos ? s.todos.filter((t) => !t.done).length : null,
+        weather: w && w.w ? w.w.temp + '°' : '',
+      }).then((j) => { if (alive) setCoachLines((j.result && j.result.lines) || []) }).catch(() => {})
+    }
+    run()
+    const iv = setInterval(run, 45 * 60000)
+    return () => { alive = false; clearInterval(iv) }
+  }, [])
+
   const submit = async (e) => {
     e && e.preventDefault()
     const key = text.trim()
     if (!key || busy) return
+    if (wantsPlan(key)) { setText(''); openPlan(key); return }
     let p = settled === key && aiFor !== 'loading' ? preview : parse(text, Date.now(), mine)
     // 这句话 AI 还没给结果：等它（最多 8 秒），等不到就用本地规则
     if (settled !== key || (aiFor !== 'done' && aiFor !== 'error')) {
@@ -567,8 +693,15 @@ export default function LifeApp() {
         if (!p.records.length) p = parse(text, Date.now(), mine)
       }
     }
-    if (!p.records.length) { say('没听懂这句。换个说法试试，比如「早饭 两个麻团 一杯豆浆 8」', 3600); return }
+    if (!p.records.length) {
+      // AI 没听懂，但这句话可能是在说一件琐事（喝了水、洗过澡）
+      const rk = guessRoutine(text)
+      if (rk) { logRoutine(rk, rk === 'water' ? guessWater(text) : null); setText(''); return }
+      say('没听懂这句。换个说法试试，比如「早饭 两个麻团 一杯豆浆 8」', 3600); return
+    }
     commit(p.records, cardsFor(p.records))
+    const rr = p.records.filter((r) => r.type === 'routine')
+    if (rr.length) pushRoutine({ action: 'logs', logs: rr.map((r) => ({ kind: r.kind, at: r.t, amount: r.amount || null })) })
     say(summaryOf(p.records))
     setText('')
   }
@@ -1038,6 +1171,12 @@ export default function LifeApp() {
           {/* 下一件 */}
           <NextCard P={P} S={S} onDone={doneEvent} />
 
+          {/* 日常：喝水、洗澡、洗头 */}
+          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} />}>
+            <RoutineCard ctx={{ S, rules, onLog: logRoutine, next: reminderNext }} />
+            {coachLines[0] ? <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink2)' }}>AI · {coachLines[0]}</div> : null}
+          </Card>
+
           {/* 时间线 */}
           <Card {...P('timeline', 4)} cls="s5 r2" style={{ display: 'flex', flexDirection: 'column' }}>
             <div className="lf-row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
@@ -1235,6 +1374,10 @@ export default function LifeApp() {
 
       <ReceiptPrinter open={printOpen} onClose={() => setPrintOpen(false)} records={db.records} S={S} cardEl={refs.current.money} rootEl={rootRef.current} />
       <GoalsPanel open={goalsOpen} onClose={() => setGoalsOpen(false)} rootRect={rootRect} suggestions={suggestions} goals={goals} onAdopt={adoptGoal} onUndo={undoGoal} celebrate={celebrate} />
+      <PlanPanel open={plan.open} draft={plan.draft} date={plan.date} busy={plan.busy} error={plan.error}
+        onClose={() => setPlan({ open: false, busy: false, draft: null, error: '', date: '', text: '' })}
+        onAccept={acceptPlan} onReplan={(c) => openPlan(plan.text, c)} />
+      <ReminderStack items={reminders} onDone={reminderDone} onSnooze={reminderSnooze} onSkip={reminderSkip} />
       {bursts.map((b) => (
         <div key={b.id} aria-hidden="true" style={{ position: 'fixed', left: b.x, top: b.y, width: 0, height: 0, zIndex: 40, pointerEvents: 'none' }}>
           {b.big && <span className="lf-ring" />}
@@ -1249,7 +1392,7 @@ export default function LifeApp() {
           <button onClick={doUndo} style={{ height: 34, padding: '0 16px', borderRadius: 17, border: 0, background: '#F2994A', color: '#1F2328', fontWeight: 600, fontSize: 14 }}>撤销</button>
         </div>
       )}
-      {toast && !undo && (
+      {toast && !undo && !reminders.length && (
         <div role="status" style={{ position: 'fixed', left: '50%', bottom: 28, transform: 'translateX(-50%)', zIndex: 20, background: '#1F2328', color: '#F4F5F1', borderRadius: 22, padding: '12px 20px', fontSize: 14, boxShadow: '0 12px 32px rgba(31,35,40,.25)', animation: 'lf-rise .35s cubic-bezier(.2,.8,.2,1)' }}>{toast}</div>
       )}
     </div>
@@ -1694,7 +1837,7 @@ function WeekBoard({ S }) {
 
 // ---------- 文案 ----------
 function domainOf(r) {
-  return { meal: 'food', expense: 'money', income: 'money', workout: 'move', sleep: 'sleep', weight: 'body', todo: 'time' }[r.type] || (r.domain === 'move' ? 'move' : 'time')
+  return { meal: 'food', expense: 'money', income: 'money', workout: 'move', sleep: 'sleep', weight: 'body', todo: 'time', routine: 'routine' }[r.type] || (r.domain === 'move' ? 'move' : 'time')
 }
 function labelOf(r) {
   switch (r.type) {
@@ -1706,6 +1849,7 @@ function labelOf(r) {
     case 'weight': return '体重 ' + r.kg + ' kg'
     case 'event': return '日程 ' + fmtTime(r.t)
     case 'todo': return '待办' + (r.amount ? ' ' + money(r.amount) : '')
+    case 'routine': return routineName(r.kind) + (r.amount ? ' ' + r.amount + ' ml' : '')
     default: return r.title
   }
 }

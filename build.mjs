@@ -6,9 +6,9 @@ fs.mkdirSync('dist', { recursive: true })
 const r = await build({ entryPoints: ['src/plugin.jsx'], bundle: true, format: 'cjs', platform: 'browser', external: ['react'], write: false, jsx: 'transform', target: 'es2020', charset: 'utf8', minify: false })
 const body = r.outputFiles[0].text
 fs.writeFileSync('client.js',
-`// 日晷 · 浏览器半边：DSH 左侧边栏里的「日晷」入口，点开是个人生活工作台。
+`// 日晷 Pro · 浏览器半边：DSH 左侧边栏里的「日晷 Pro」，点开是个人生活工作台 + AI 管家。
 window.__ModuleLoader__.load({
-  id: 'dsh-rigui',
+  id: 'dsh-rigui-pro',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports
@@ -19,7 +19,7 @@ ${body}
 })
 `)
 fs.copyFileSync('src/host.js', 'index.js')
-fs.writeFileSync('cordis.patch.yml', `# 日晷：DSH 左侧边栏的一行入口 + 主区域的生活工作台\n- insert:\n    - id: rigui\n      name: dsh-rigui\n`)
+fs.writeFileSync('cordis.patch.yml', `# 日晷 Pro：DSH 左侧边栏的一行入口 + 主区域的生活工作台\n- insert:\n    - id: rigui-pro\n      name: dsh-rigui-pro\n`)
 // 2) 预览页：一个自包含的 html，模拟 DSH 侧边栏
 const p = await build({ entryPoints: ['src/preview.jsx'], bundle: true, format: 'iife', platform: 'browser', write: false, jsx: 'transform', target: 'es2020', charset: 'utf8', minify: true,
   alias: { react: './src/react-shim.cjs', 'react-dom/client': './src/react-dom-shim.cjs' } })

@@ -350,9 +350,23 @@ export function derive(records, now = Date.now()) {
   if (lastNight && !T.includes(lastNight)) groups.set(lastNight.id, { key: lastNight.id, t: lastNight.t + lastNight.hours * 3600000, items: [lastNight], wake: true })
   const timeline = [...groups.values()].sort((a, b) => b.t - a.t)
 
+  // 日常琐事：今天各做了几次、上一次是什么时候（洗头要看过去的）
+  const rToday = {}, rLast = {}
+  records.forEach((r) => {
+    if (r.type !== 'routine' || !r.kind) return
+    if (!rLast[r.kind] || r.t > rLast[r.kind].t) rLast[r.kind] = r
+    if (inDay(r, today)) {
+      const o = rToday[r.kind] || (rToday[r.kind] = { count: 0, ml: 0, lastAt: 0 })
+      o.count++
+      o.ml += r.amount || 0
+      if (r.t > o.lastAt) o.lastAt = r.t
+    }
+  })
+
   const S = {
     now, today, meals, workouts, kcalIn, burned, allowance, spent, todaySpent, remaining, perDay, pace, daysLeft, dayOfMonth, daysInMonth,
     nowEvent, cats, pendingBills, lastNight, week, sleepAvg, weekWorkouts, weekMinutes, weekKcal, wNow, wDelta, weights, events, todayEvents, next, todos, heat, timeline,
+    routines: { today: rToday, last: rLast },
   }
   S.insights = insights(S, records)
   S.nextAdvice = adviceFor(S)
@@ -528,6 +542,7 @@ export function effectsOf(records) {
     if (r.type === 'weight') e.add('body')
     if (r.type === 'event') { e.add('time'); if (r.domain === 'move') e.add('move') }
     if (r.type === 'todo') { e.add('time'); if (r.amount) e.add('money') }
+    if (r.type === 'routine') { e.add('routine'); e.add('time') }
   })
   e.add('link')
   return e
@@ -536,6 +551,7 @@ export function effectsOf(records) {
 // ---------- AI 结果 → 记录 ----------
 const MEAL_KEYS = new Set(['breakfast', 'lunch', 'dinner', 'snack'])
 const CATS = new Set(['餐饮', '交通', '购物', '居家', '订阅', '宠物', '运动', '医疗', '娱乐', '社交', '其他'])
+const ROUTINE_NAME = { water: '喝水', shower: '洗澡', hair: '洗头', teeth: '刷牙', stretch: '活动一下', meal: '吃饭', sleep: '睡觉', medicine: '吃药', custom: '这件事' }
 const nOr = (v, d) => (typeof v === 'number' && isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && isFinite(+v) ? +v : d)
 
 export function fromAI(res, input, now = Date.now()) {
@@ -583,6 +599,11 @@ export function fromAI(res, input, now = Date.now()) {
       out.records.push({ id: uid(), type: 'sleep', t: bed, hours: +hours.toFixed(2), title: '睡了 ' + fmtHM(hours), ai: true })
     } else if (r.type === 'weight' && nOr(r.kg, 0) > 20) {
       out.records.push({ id: uid(), type: 'weight', t: at(r, 8) ?? now, kg: nOr(r.kg, 0), title: '体重 ' + nOr(r.kg, 0) + ' kg', ai: true })
+    } else if (r.type === 'routine') {
+      const kind = String(r.kind || 'custom').slice(0, 16)
+      if (!kind) continue
+      const amount = nOr(r.amount, null)
+      out.records.push({ id: uid(), type: 'routine', kind, t: at(r, 12) ?? now, amount: amount && amount > 0 ? Math.round(amount) : null, title: String(r.title || ROUTINE_NAME[kind] || '这件事').slice(0, 20), ai: true })
     } else if (r.type === 'event' && r.title) {
       const base = dayOf(r.date)
       const t = hm(r.start, base) ?? base + 9 * 3600000

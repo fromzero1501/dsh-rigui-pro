@@ -1,12 +1,26 @@
-// 日晷 · 主机半边：给页面开一个 /api/rigui 接口，用 DSH 里配好的模型把一句话拆成记录。
-// 调模型的方式和 ds-bot 一样：ctx.llm.stream，按块收文字，见到 finish 结束。
-export const name = 'dsh-rigui'
+// 日晷 Pro · 主机半边
+// 1) /api/rigui-pro/parse  把一句话拆成记录（沿用原来的解析器）
+// 2) /api/rigui-pro/plan   AI 排程：把「要做的事」拆进一天的时间块
+// 3) /api/rigui-pro/coach  每天几句具体的建议（带数字，不说废话）
+// 4) /api/rigui-pro/routine 规律与提醒：规则同步、完成打点、到点提醒
+// 数据：记录仍在本机浏览器里；这里只存「规律规则 + 最近完成时间 + 待触发提醒」，
+// 落在 $DSH_HOME/rigui-pro.json，不出本机。
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { homedir, platform } from 'node:os'
+import { dirname, join } from 'node:path'
+import { exec } from 'node:child_process'
+
+export const name = 'dsh-rigui-pro'
 export const inject = ['llm', 'connection']
 
-const ROUTE = '/api/rigui'
-const TIMEOUT_MS = 25000
+const ROUTE = '/api/rigui-pro'
+const AI_TIMEOUT_MS = 45000
+const STORE_FILE = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'rigui-pro.json')
+const DAY = 86400000
 
-const SYSTEM = `你是「日晷」生活记录工具的解析器。把用户随口说的一句话拆成结构化记录。只输出一个 JSON 对象，不要任何解释或代码块标记。
+// ---------- 提示词 ----------
+
+const PARSE_SYSTEM = `你是「日晷」生活记录工具的解析器。把用户随口说的一句话拆成结构化记录。只输出一个 JSON 对象，不要任何解释或代码块标记。
 
 记录类型（字段名必须一致）：
 - 吃喝：{"type":"meal","meal":"breakfast|lunch|dinner|snack","time":"HH:MM"|null,"items":[{"name":"麻团","qty":2,"unit":"个","kcal":460}]}
@@ -15,30 +29,59 @@ const SYSTEM = `你是「日晷」生活记录工具的解析器。把用户随�
   · 没说是哪一餐时按时间判断：早于 10:30 早餐，10:30–14:30 午餐，17:00–21:00 晚餐，其余加餐。
 - 花销：{"type":"expense","amount":32,"cat":"餐饮|交通|购物|居家|订阅|宠物|运动|医疗|娱乐|社交|其他","title":"牛肉面"}
 - 收入：{"type":"income","amount":18000,"title":"工资"}
-- 运动：{"type":"workout","kind":"跑步","minutes":30,"km":5|null,"steps":8000|null,"kcal":375}（kcal 是消耗，按用户体重估；用户说的是步数时 steps 原样给出、kind 用「走路」，minutes 按每分钟约 110 步估）
+- 运动：{"type":"workout","kind":"跑步","minutes":30,"km":5|null,"steps":8000|null,"kcal":375}
 - 睡眠：{"type":"sleep","bed":"HH:MM"|null,"wake":"HH:MM"|null,"hours":7.5}
 - 体重：{"type":"weight","kg":68.1}
-- 日程（以后要做的、有时间的事）：{"type":"event","title":"…","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM"|null,"domain":"move|time","minutes":60|null,"kcal":数字|null}（运动类安排 domain 用 move，并估 minutes 和 kcal）
+- 日常琐事（喝水、洗澡、洗头、刷牙、站起来活动、吃药等）：{"type":"routine","kind":"water|shower|hair|teeth|stretch|medicine|custom","title":"喝水","amount":250|null}
+  · amount 只对喝水有意义，单位毫升；用户说「一杯」按 250，「一大杯」按 500，没说就 null。
+  · 洗澡用 shower，洗头用 hair，两个都说了就两条记录。
+- 日程（以后要做的、有时间的事）：{"type":"event","title":"…","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM"|null,"domain":"move|time","minutes":60|null,"kcal":数字|null}
 - 待办（没有具体时间的事）：{"type":"todo","title":"…","amount":数字|null}
 
 规则：
 - 吃东西又说了价钱：一条 meal 加一条 expense（cat 用 餐饮，title 用吃的东西）。
 - 没写单位的数字，按语境判断是钱、分钟还是数量；不确定时，吃饭语境里的两位数多半是钱。
 - 「昨天」「明天」「今早」等按现在的时间换算成具体日期和时间。
-- 说的是过去某天的事（「一周前体重 83.2」「上周三跑了 5 公里」「3 天前吃了火锅」「10月28日花了 200」），在那条记录里加 "date":"YYYY-MM-DD"（按现在的日期往前算）；今天的事不加 date。
+- 说的是过去某天的事，在那条记录里加 "date":"YYYY-MM-DD"；今天的事不加 date。
 - 一句话里可以有多条记录。
-- tokens 列出原句里起关键作用的片段及领域（food、money、move、sleep、body、time），片段必须是原句里一字不差的子串。
+- tokens 列出原句里起关键作用的片段及领域（food、money、move、sleep、body、time、life），片段必须是原句里一字不差的子串。
 - note：只有在你明显拿不准时写一句很短的中文说明，否则空字符串。
 
 输出格式：{"records":[…],"tokens":[{"text":"…","domain":"…"}],"note":""}`
 
-function userPrompt(p) {
-  const lines = [`现在：${p.now || ''}`, `用户体重：约 ${p.weightKg || 68} kg`]
-  const mine = p.mine && Object.keys(p.mine).length ? Object.entries(p.mine).slice(0, 60).map(([k, v]) => `${k} 每份 ${v} 千卡`).join('；') : ''
-  if (mine) lines.push(`用户亲自改过的热量（以此为准）：${mine}`)
-  lines.push(`这句话：${String(p.text || '').slice(0, 300)}`)
-  return lines.join('\n')
-}
+const PLAN_SYSTEM = `你是「日晷 Pro」的日程管家，替一位自己做生意的人安排一天。他不是上班族：时间自己定，但要跑执照、剪视频、开直播、回客服，事情杂且容易拖。
+用户会说今天或明天要做的事，你要把这些事连同他固定要做的事（吃饭、洗澡、睡觉、喝水）排成一份可以直接执行的时间表。
+
+只输出一个 JSON 对象，不要解释、不要代码块标记：
+{"date":"YYYY-MM-DD","summary":"一句话说这份安排的样子","blocks":[{"start":"HH:MM","end":"HH:MM","title":"…","domain":"admin|work|life|move|rest","why":"为什么排在这个位置，一句短话","remind":true}],"notes":["值得提醒他的事，最多两条"],"question":""}
+
+排的规矩：
+1. 已有日程是锚点，绝对不能和它们重叠，也不要贴着前后各留 10 分钟缓冲。
+2. 三餐和睡觉是固定的：早饭 07:30、午饭 12:00、晚饭 18:00、睡觉按他昨晚的入睡时间和目标反推；吃饭前后各留 20 分钟。
+3. 需要出门办事（办证、银行、政务大厅、寄件）放在工作日 09:00–11:30 或 14:00–16:30，别排在午休和傍晚。
+4. 费脑的活（写脚本、拍剪、选品、复盘）排上午；机械的活（回客服、搬货、整理）排下午；运动排在晚饭前或早上，别排饭后一小时内。
+5. 单块不超过 90 分钟，超过就拆成两块，中间留 10–15 分钟休息。
+6. 全部安排加起来不超过当天可用时间的七成，剩下留给他自己。
+7. 只排他提到的事和必须做的事，不要替他加一堆「应该做」的活；没提就空着。
+8. 时间用 24 小时 HH:MM；不确定时长按经验估，并在 why 里说明是估的。
+9. 没说是哪天就按「今天」；已经过去的时段不要排，从下一个整点或半小时开始。
+10. 如果他说的事情本身矛盾（比如两个必须同时做的会），在 question 里问一句，不要硬排。
+
+domain 取值：admin（办事、跑腿）、work（干活）、life（吃饭洗澡这类）、move（运动）。`
+
+const COACH_SYSTEM = `你是「日晷 Pro」的管家，只在合适的时候说一两句有用的话。
+根据用户今天的数据，给出最多两条建议：每条不超过 26 个字，必须带具体数字或时间，必须是他现在就能做的事。
+不要鼓励、不要总结、不要说「继续保持」这类空话；没有值得说的事就返回空数组。
+只输出 JSON：{"lines":["…","…"]}`
+
+// ---------- 小工具 ----------
+const json = (obj) => new Response(JSON.stringify(obj), { status: 200, headers: { 'content-type': 'application/json' } })
+const pad = (n) => (n < 10 ? '0' : '') + n
+const hhmm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes())
+const ymd = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+const startOfDay = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime() }
+const minutesOf = (s) => { const m = /^(\d{1,2})[:：](\d{2})$/.exec(String(s || '').trim()); return m ? +m[1] * 60 + +m[2] : null }
+const stampOf = (day, min) => day + min * 60000
 
 function extractJSON(text) {
   const t = String(text || '').replace(/```(?:json)?/gi, '').trim()
@@ -47,9 +90,173 @@ function extractJSON(text) {
   return JSON.parse(t.slice(a, b + 1))
 }
 
-export function apply(ctx) {
-  // DSH 的默认模型；同一家里有更快的非推理模型就用它（记一笔要快）
-  async function pickModel() {
+// ---------- 提醒仓库 ----------
+const DEFAULT_RULES = [
+  { id: 'water', kind: 'water', title: '喝水', mode: 'interval', everyMin: 90, from: '09:00', to: '21:00', per: 250, enabled: true },
+  { id: 'breakfast', kind: 'meal', title: '吃早饭', mode: 'fixed', times: ['07:30'], enabled: true },
+  { id: 'lunch', kind: 'meal', title: '吃午饭', mode: 'fixed', times: ['12:00'], enabled: true },
+  { id: 'dinner', kind: 'meal', title: '吃晚饭', mode: 'fixed', times: ['18:00'], enabled: true },
+  { id: 'shower', kind: 'shower', title: '洗澡', mode: 'fixed', times: ['22:30'], enabled: true },
+  { id: 'hair', kind: 'hair', title: '洗头', mode: 'gap', minGapDays: 3, at: '21:30', enabled: true },
+  { id: 'sleep', kind: 'sleep', title: '该睡了', mode: 'fixed', times: ['23:30'], enabled: true },
+]
+
+const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0 })
+
+function readStore() {
+  try {
+    if (!existsSync(STORE_FILE)) return EMPTY()
+    const raw = JSON.parse(readFileSync(STORE_FILE, 'utf8'))
+    const s = { ...EMPTY(), ...raw }
+    if (!Array.isArray(s.rules) || !s.rules.length) s.rules = EMPTY().rules
+    if (!Array.isArray(s.logs)) s.logs = []
+    if (!Array.isArray(s.alarms)) s.alarms = []
+    if (!s.fired || typeof s.fired !== 'object') s.fired = {}
+    s.prefs = { quiet: { from: '23:30', to: '07:30' }, system: true, ...(s.prefs || {}) }
+    return s
+  } catch { return EMPTY() }
+}
+
+function writeStore(s) {
+  try {
+    mkdirSync(dirname(STORE_FILE), { recursive: true })
+    const tmp = STORE_FILE + '.tmp'
+    writeFileSync(tmp, JSON.stringify(s, null, 2), 'utf8')
+    renameSync(tmp, STORE_FILE)
+  } catch (e) { console.warn('[dsh-rigui-pro] 存提醒失败', e && e.message) }
+}
+
+// ---------- 系统弹窗 ----------
+function esc(v) { return String(v).replace(/[`"]/g, '') }
+function notify(title, message) {
+  if (platform() !== 'win32') return
+  const ps = `Add-Type -AssemblyName System.Windows.Forms
+$n = New-Object System.Windows.Forms.NotifyIcon
+$n.Icon = [System.Drawing.SystemIcons]::Information
+$n.BalloonTipTitle = "${esc(title)}"
+$n.BalloonTipText = "${esc(message)}"
+$n.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
+$n.Visible = $true
+$n.ShowBalloonTip(8000)
+Start-Sleep -Seconds 2
+$n.Dispose()`
+  const b64 = Buffer.from(ps, 'utf16le').toString('base64')
+  exec(`powershell -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${b64}`, { windowsHide: true }, () => {})
+}
+
+// ---------- 提醒推算 ----------
+// 同一类事最近一次完成的时间
+function lastLogOf(s, kind, before = Date.now()) {
+  let best = 0
+  for (const l of s.logs) if (l.kind === kind && l.at <= before && l.at > best) best = l.at
+  return best
+}
+
+function inQuiet(s, t) {
+  const q = s.prefs.quiet || {}
+  const a = minutesOf(q.from), b = minutesOf(q.to)
+  if (a == null || b == null) return false
+  const d = new Date(t), m = d.getHours() * 60 + d.getMinutes()
+  return a <= b ? m >= a && m < b : m >= a || m < b
+}
+
+// 这条规则下一次该响的时间（毫秒），没有就返回 0
+function nextAt(rule, s, now) {
+  if (!rule || rule.enabled === false) return 0
+  const today = startOfDay(now)
+  if (rule.mode === 'fixed') {
+    let best = 0
+    for (const t of rule.times || []) {
+      const m = minutesOf(t)
+      if (m == null) continue
+      for (let k = 0; k < 2; k++) {
+        const at = stampOf(today + k * DAY, m)
+        if (at <= now + 1000) continue
+        if (!best || at < best) best = at
+      }
+    }
+    return best
+  }
+  if (rule.mode === 'interval') {
+    const from = minutesOf(rule.from) ?? 540, to = minutesOf(rule.to) ?? 1260
+    const every = Math.max(15, rule.everyMin || 90) * 60000
+    const last = lastLogOf(s, rule.kind, now)
+    let base = last || stampOf(today, from)
+    // 今天已经超过窗口，就从明天开始
+    if (!last && now < stampOf(today, from)) base = stampOf(today, from) - every
+    let next = base + every
+    if (next <= now) next = now + 1000 > next && last ? base + every : next
+    for (let i = 0; i < 40 && next <= now; i++) next += every
+    const d = new Date(next)
+    const mins = d.getHours() * 60 + d.getMinutes()
+    if (mins > to) { const nd = new Date(startOfDay(next) + DAY); nd.setHours(Math.floor(from / 60), from % 60, 0, 0); next = nd.getTime() }
+    if (mins < from) { const nd = new Date(next); nd.setHours(Math.floor(from / 60), from % 60, 0, 0); next = nd.getTime() }
+    return next
+  }
+  if (rule.mode === 'gap') {
+    const last = lastLogOf(s, rule.kind, now)
+    const gapMs = Math.max(1, rule.minGapDays || 3) * DAY
+    const at = minutesOf(rule.at) ?? 1290
+    let due = last ? startOfDay(last + gapMs) : startOfDay(now)
+    let atToday = stampOf(due, at)
+    if (atToday <= now) {
+      if (!last) return 0
+      if (atToday + DAY > now) return atToday + DAY
+      return atToday + DAY
+    }
+    return atToday
+  }
+  return 0
+}
+
+function fireKey(ruleId, at) { return ruleId + '@' + ymd(new Date(at)) + ' ' + hhmm(new Date(at)) }
+
+function tick(s, now) {
+  const created = []
+  for (const rule of s.rules) {
+    const at = nextAt(rule, s, now)
+    if (!at || at > now) continue
+    if (inQuiet(s, now) && rule.kind !== 'sleep') continue
+    const k = fireKey(rule.id, at)
+    if (s.fired[k]) continue
+    s.fired[k] = now
+    const body = bodyFor(rule, s, now)
+    s.alarms.push({ id: 'a' + now.toString(36) + Math.random().toString(36).slice(2, 5), ruleId: rule.id, kind: rule.kind, title: rule.title, body, at, firedAt: now, seenAt: 0 })
+    created.push({ title: rule.title, body })
+  }
+  if (s.alarms.length > 60) s.alarms = s.alarms.slice(-60)
+  // 清掉太老的 fired 记录
+  const keys = Object.keys(s.fired)
+  if (keys.length > 400) {
+    const keep = {}
+    keys.slice(-300).forEach((k) => { keep[k] = s.fired[k] })
+    s.fired = keep
+  }
+  return created
+}
+
+function bodyFor(rule, s, now) {
+  if (rule.kind === 'water') {
+    const last = lastLogOf(s, rule.kind, now)
+    if (!last) return '今天还没喝水，先来一杯（约 250 ml）'
+    const mins = Math.max(1, Math.round((now - last) / 60000))
+    const cups = s.logs.filter((l) => l.kind === 'water' && l.at >= startOfDay(now)).length
+    return `距上次喝水 ${mins} 分钟，今天第 ${cups + 1} 杯`
+  }
+  if (rule.kind === 'hair') {
+    const last = lastLogOf(s, rule.kind, now)
+    if (!last) return '还没记过洗头，今天洗一次？'
+    return `距上次洗头 ${Math.floor((now - last) / DAY)} 天`
+  }
+  if (rule.kind === 'shower') return '洗个澡，今天到这儿了'
+  if (rule.kind === 'meal') return '到饭点了，吃完顺手记一笔'
+  if (rule.kind === 'sleep') return '放下手机，明天还要干活'
+  return '该做这件事了'
+}
+
+// ---------- 模型 ----------
+function makeAsk(ctx) {
+  async function pickModel(strong) {
     const sel = ctx.get?.('agentDefaultModel')?.currentSelection?.()
     let provider = sel?.provider, model = sel?.model
     const providers = ctx.llm.listProviders()
@@ -57,16 +264,18 @@ export function apply(ctx) {
     if (!provider) throw new Error('DSH 里还没有可用的模型，请先在设置里添加')
     try {
       const models = await ctx.llm.listModels(provider)
-      const fast = models.find((m) => /flash|chat|lite|mini|turbo|v3/i.test(m.id) && !/reason|r1|think|pro/i.test(m.id))
-      if (fast) model = fast.id
+      if (!strong) {
+        const fast = models.find((m) => /flash|chat|lite|mini|turbo|v3/i.test(m.id) && !/reason|r1|think|pro/i.test(m.id))
+        if (fast) model = fast.id
+      }
       if (!model) model = models[0]?.id
     } catch {}
     if (!model) throw new Error('DSH 里还没有可用的模型，请先在设置里添加')
     return { provider, model }
   }
 
-  async function ask(system, user, signal) {
-    const route = await pickModel()
+  return async function ask(system, user, { signal, maxTokens = 1600, strong = false } = {}) {
+    const route = await pickModel(strong)
     const info = await ctx.llm.resolveModelInfo?.(route.provider, route.model).catch(() => undefined)
     const efforts = info?.reasoning?.efforts ?? []
     const effort = efforts.some((e) => e.id === 'off') ? 'off' : efforts.at(0)?.id
@@ -77,17 +286,245 @@ export function apply(ctx) {
       ...(effort === undefined ? {} : { reasoningEffort: effort }),
       system,
       messages: [{ role: 'user', content: [{ type: 'text', text: user }] }],
-      maxTokens: 1600,
+      maxTokens,
       signal,
     })) {
       if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') text += chunk.text
       else if (chunk?.type === 'finish') finish = chunk.reason
     }
-    if (finish && (finish.kind === 'error' || finish.kind === 'aborted')) throw new Error(finish.failure?.message || '模型调用失败')
+    if (finish && (finish.kind === 'error' || finish.kind === 'aborted')) {
+      const msg = finish.failure?.message || '模型调用失败'
+      if (/max.?token|length/i.test(msg)) throw new Error('这次事情太多，一次排不下，分两段说试试')
+      throw new Error(msg)
+    }
     return { text, model: route.model }
   }
+}
 
-  const json = (obj) => new Response(JSON.stringify(obj), { status: 200, headers: { 'content-type': 'application/json' } })
+// 解析一句话
+function parsePrompt(p) {
+  const lines = [`现在：${p.now || ''}`, `用户体重：约 ${p.weightKg || 68} kg`]
+  const mine = p.mine && Object.keys(p.mine).length ? Object.entries(p.mine).slice(0, 60).map(([k, v]) => `${k} 每份 ${v} 千卡`).join('；') : ''
+  if (mine) lines.push(`用户亲自改过的热量（以此为准）：${mine}`)
+  lines.push(`这句话：${String(p.text || '').slice(0, 300)}`)
+  return lines.join('\n')
+}
+
+// 排程上下文
+function planPrompt(p) {
+  const L = []
+  L.push(`现在：${p.now}`)
+  L.push(`要安排的那天：${p.date}${p.weekday ? '（周' + p.weekday + '）' : ''}`)
+  if (p.profile) L.push(`他是谁：${p.profile}`)
+  if (p.lastNight) L.push(`昨晚睡了 ${p.lastNight} 小时`)
+  if (p.goals) L.push(`目标：每天 ${p.goals.kcal || '—'} 千卡、睡 ${p.goals.sleep || '—'} 小时、每周练 ${p.goals.workoutsPerWeek || '—'} 次`)
+  if (p.weather) L.push(`天气：${p.weather}`)
+  L.push('那天已经有的安排（不能动，也不能贴太近）：')
+  if (Array.isArray(p.busy) && p.busy.length) p.busy.forEach((b) => L.push(`- ${b.start}–${b.end} ${b.title}`))
+  else L.push('- 无')
+  if (Array.isArray(p.todos) && p.todos.length) {
+    L.push('还没做的事（有时间的就排进去，没时间的挑重要的排）：')
+    p.todos.slice(0, 12).forEach((t) => L.push(`- ${t.title}${t.amount ? '（' + t.amount + ' 元）' : ''}`))
+  }
+  if (p.routineLine) L.push(`他的固定习惯：${p.routineLine}`)
+  if (p.constraint) L.push(`他这次补充的要求：${String(p.constraint).slice(0, 200)}`)
+  L.push(`他说的话：${String(p.text || '').slice(0, 400)}`)
+  return L.join('\n')
+}
+
+function coachPrompt(p) {
+  const L = [`现在：${p.now}`]
+  if (p.name) L.push(`称呼：${p.name}`)
+  L.push(`今天：吃了 ${p.kcalIn || 0} 千卡（目标 ${p.kcal || '—'}），花了 ${p.spent || 0} 元（预算 ${p.budget || '—'}），练了 ${p.moveMin || 0} 分钟`)
+  if (p.lastNight) L.push(`昨晚睡了 ${p.lastNight} 小时`)
+  if (p.water != null) L.push(`今天喝了 ${p.water} 次水`)
+  if (p.hairDays != null) L.push(`距上次洗头 ${p.hairDays} 天`)
+  if (p.nextEvent) L.push(`接下来：${p.nextEvent}`)
+  if (p.todoLeft != null) L.push(`还有 ${p.todoLeft} 件事没做`)
+  if (p.weather) L.push(`天气：${p.weather}`)
+  return L.join('\n')
+}
+
+// ---------- 排程结果规整 ----------
+// 模型偶尔还是会排出半夜的块、和已有日程撞车的块。这里按「人看之前」的硬规矩再过一遍。
+function tidyPlan(raw, dateStr, busy) {
+  const day0 = new Date(dateStr + 'T00:00:00').getTime()
+  const taken = []
+  for (const b of Array.isArray(busy) ? busy : []) {
+    const s = minutesOf(b?.start), e = minutesOf(b?.end)
+    if (s != null && e != null && e > s) taken.push([s, e])
+  }
+  const list = []
+  for (const b of Array.isArray(raw?.blocks) ? raw.blocks : []) {
+    const s = minutesOf(b?.start), e = minutesOf(b?.end)
+    if (s == null || e == null || e <= s) continue
+    // 只在 06:00–23:30 之间，单块不超过 3 小时
+    if (s < 6 * 60 || e > 23 * 60 + 30 || e - s > 180) continue
+    list.push({ s, e, b })
+  }
+  list.sort((x, y) => x.s - y.s)
+  const out = []
+  for (const { s, e, b } of list) {
+    if (out.length >= 14) break
+    if (taken.some(([bs, be]) => s < be && e > bs)) continue
+    taken.push([s, e])
+    out.push({
+      start: b.start, end: b.end, title: String(b.title || '').slice(0, 30),
+      domain: ['admin', 'work', 'life', 'move', 'rest'].includes(b.domain) ? b.domain : 'work',
+      why: String(b.why || '').slice(0, 60), remind: b.remind !== false,
+      t: day0 + s * 60000, endT: day0 + e * 60000,
+    })
+  }
+  return { date: dateStr, summary: String(raw?.summary || '').slice(0, 80), blocks: out, notes: (raw?.notes || []).slice(0, 2).map((x) => String(x).slice(0, 80)), question: String(raw?.question || '').slice(0, 120) }
+}
+
+// ---------- 插件本体 ----------
+export function apply(ctx) {
+  const ask = makeAsk(ctx)
+  let store = readStore()
+  let timer = null
+
+  const save = () => writeStore(store)
+
+  function runTick() {
+    try {
+      const now = Date.now()
+      const created = tick(store, now)
+      if (created.length) {
+        save()
+        const quietClient = !store.seenAt || now - store.seenAt > 90000
+        if (quietClient && store.prefs.system !== false) {
+          const one = created[0]
+          notify(one.title, created.length > 1 ? `${one.body}（另有 ${created.length - 1} 条）` : one.body)
+        }
+      }
+    } catch (e) { console.warn('[dsh-rigui-pro] 提醒轮询出错', e && e.message) }
+  }
+
+  ctx.effect(() => {
+    timer = setInterval(runTick, 15000)
+    if (typeof timer.unref === 'function') timer.unref()
+    setTimeout(runTick, 2500)
+    return () => { if (timer) clearInterval(timer) }
+  }, 'dsh-rigui-pro: 提醒调度')
+
+  function statePayload(now) {
+    const due = store.alarms.filter((a) => !a.seenAt && a.at <= now + 1000)
+    const next = store.rules.map((r) => ({ id: r.id, kind: r.kind, title: r.title, at: nextAt(r, store, now) })).filter((r) => r.at)
+    return {
+      now,
+      rules: store.rules,
+      due: due.map((a) => ({ id: a.id, ruleId: a.ruleId, kind: a.kind, title: a.title, body: a.body, at: a.at })),
+      next,
+      today: {}
+    }
+  }
+
+  const api = async (body, signal) => {
+    const p = body.payload || {}
+    const now = Date.now()
+
+    if (body.endpoint === 'ping') return { ok: true, result: { name, store: STORE_FILE } }
+
+    if (body.endpoint === 'weather' || body.endpoint === 'geo') {
+      const url = body.endpoint === 'geo'
+        ? 'https://geocoding-api.open-meteo.com/v1/search?count=1&language=zh&name=' + encodeURIComponent(String(p.name || '').slice(0, 40))
+        : 'https://api.open-meteo.com/v1/forecast?current=temperature_2m,apparent_temperature,weather_code,is_day,relative_humidity_2m,wind_speed_10m&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=7&latitude=' + Number(p.lat) + '&longitude=' + Number(p.lon)
+      const r = await fetch(url, { signal: AbortSignal.timeout(8000) })
+      if (!r.ok) throw new Error('天气服务 ' + r.status)
+      return { ok: true, result: await r.json() }
+    }
+
+    if (body.endpoint === 'parse') {
+      const r = await ask(PARSE_SYSTEM, parsePrompt(p), { signal, maxTokens: 1600 })
+      return { ok: true, model: r.model, result: extractJSON(r.text) }
+    }
+
+    if (body.endpoint === 'plan' || body.endpoint === 'replan') {
+      const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) ? p.date : ymd(new Date())
+      const r = await ask(PLAN_SYSTEM, planPrompt({ ...p, date: dateStr }), { signal, maxTokens: 2400, strong: true })
+      const plan = tidyPlan(extractJSON(r.text), dateStr, p.busy)
+      return { ok: true, model: r.model, result: plan }
+    }
+
+    if (body.endpoint === 'coach') {
+      const r = await ask(COACH_SYSTEM, coachPrompt(p), { signal, maxTokens: 400 })
+      const j = extractJSON(r.text)
+      return { ok: true, model: r.model, result: { lines: (j.lines || []).filter((x) => typeof x === 'string').slice(0, 2) } }
+    }
+
+    // ---- 规律与提醒 ----
+    if (body.endpoint === 'routine') {
+      const action = p.action || 'state'
+      if (action === 'state') {
+        store.seenAt = now
+        save()
+        return { ok: true, result: statePayload(now) }
+      }
+      if (action === 'rules') {
+        const rules = Array.isArray(p.rules) ? p.rules.slice(0, 24) : null
+        if (rules) {
+          store.rules = rules.map((r) => ({
+            id: String(r.id || '').slice(0, 24) || 'r' + Math.random().toString(36).slice(2, 6),
+            kind: String(r.kind || 'custom').slice(0, 16),
+            title: String(r.title || '提醒').slice(0, 24),
+            mode: ['fixed', 'interval', 'gap'].includes(r.mode) ? r.mode : 'fixed',
+            times: Array.isArray(r.times) ? r.times.slice(0, 4).map((t) => String(t).slice(0, 5)) : undefined,
+            everyMin: r.everyMin ? Math.max(15, Math.min(720, +r.everyMin)) : undefined,
+            from: r.from ? String(r.from).slice(0, 5) : undefined,
+            to: r.to ? String(r.to).slice(0, 5) : undefined,
+            minGapDays: r.minGapDays ? Math.max(1, Math.min(60, +r.minGapDays)) : undefined,
+            at: r.at ? String(r.at).slice(0, 5) : undefined,
+            per: r.per ? +r.per : undefined,
+            enabled: r.enabled !== false,
+          }))
+          save()
+        }
+        return { ok: true, result: statePayload(now) }
+      }
+      if (action === 'log') {
+        const kind = String(p.kind || '').slice(0, 16)
+        if (kind) {
+          store.logs.push({ id: 'l' + now.toString(36) + Math.random().toString(36).slice(2, 4), kind, at: Number(p.at) || now, amount: p.amount ? +p.amount : null })
+          if (store.logs.length > 800) store.logs = store.logs.slice(-800)
+          // 记了就算这轮提醒已经处理
+          store.alarms.forEach((a) => { if (!a.seenAt && a.kind === kind) a.seenAt = now })
+          save()
+          runTick()
+        }
+        return { ok: true, result: statePayload(now) }
+      }
+      if (action === 'logs') {
+        if (Array.isArray(p.logs)) {
+          for (const l of p.logs.slice(-60)) {
+            if (!l || !l.kind || !l.at) continue
+            if (!store.logs.some((x) => x.kind === l.kind && Math.abs(x.at - l.at) < 60000)) store.logs.push({ id: l.id || 'l' + l.at.toString(36), kind: String(l.kind).slice(0, 16), at: +l.at, amount: l.amount ? +l.amount : null })
+          }
+          if (store.logs.length > 800) store.logs = store.logs.slice(-800)
+          save()
+        }
+        return { ok: true, result: statePayload(now) }
+      }
+      if (action === 'ack') {
+        const ids = Array.isArray(p.ids) ? p.ids : [p.id]
+        store.alarms.forEach((a) => { if (ids.includes(a.id) && !a.seenAt) a.seenAt = now })
+        save()
+        return { ok: true, result: statePayload(now) }
+      }
+      if (action === 'snooze') {
+        const mins = Math.max(1, Math.min(180, +p.minutes || 15))
+        const ids = Array.isArray(p.ids) ? p.ids : [p.id]
+        store.alarms.forEach((a) => { if (ids.includes(a.id)) a.seenAt = now })
+        const src = store.alarms.find((a) => ids.includes(a.id))
+        if (src) store.alarms.push({ ...src, id: 's' + now.toString(36), at: now + mins * 60000, firedAt: now, seenAt: 0, title: src.title })
+        save()
+        return { ok: true, result: statePayload(now) }
+      }
+      return { ok: false, error: '未知的 routine 动作' }
+    }
+
+    return { ok: false, error: '未知接口' }
+  }
 
   ctx.effect(() => ctx.connection.fetch.register({
     path: ROUTE,
@@ -96,28 +533,14 @@ export function apply(ctx) {
     fetch: async (request) => {
       let body = {}
       try { body = await request.json() } catch {}
-      const timeout = AbortSignal.timeout(TIMEOUT_MS)
+      const timeout = AbortSignal.timeout(AI_TIMEOUT_MS)
       const signal = request.signal && AbortSignal.any ? AbortSignal.any([request.signal, timeout]) : timeout
       try {
-        if (body.endpoint === 'ping') return json({ ok: true })
-        // 天气：Open-Meteo，免 key；城市名 → 经纬度
-        if (body.endpoint === 'weather' || body.endpoint === 'geo') {
-          const p = body.payload || {}
-          const url = body.endpoint === 'geo'
-            ? 'https://geocoding-api.open-meteo.com/v1/search?count=1&language=zh&name=' + encodeURIComponent(String(p.name || '').slice(0, 40))
-            : 'https://api.open-meteo.com/v1/forecast?current=temperature_2m,apparent_temperature,weather_code,is_day,relative_humidity_2m,wind_speed_10m&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=7&latitude=' + Number(p.lat) + '&longitude=' + Number(p.lon)
-          const r = await fetch(url, { signal: AbortSignal.timeout(8000) })
-          if (!r.ok) throw new Error('天气服务 ' + r.status)
-          return json({ ok: true, result: await r.json() })
-        }
-        if (body.endpoint === 'parse') {
-          const r = await ask(SYSTEM, userPrompt(body.payload || {}), signal)
-          return json({ ok: true, model: r.model, result: extractJSON(r.text) })
-        }
-        return json({ ok: false, error: '未知接口' })
+        return json(await api(body, signal))
       } catch (error) {
-        return json({ ok: false, error: error?.name === 'TimeoutError' ? '模型响应超时' : String(error?.message || error) })
+        const msg = error?.name === 'TimeoutError' ? '等太久了，再说一次' : String(error?.message || error)
+        return json({ ok: false, error: msg })
       }
     },
-  }), 'dsh-rigui: api route')
+  }), 'dsh-rigui-pro: api route')
 }

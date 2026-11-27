@@ -1,7 +1,7 @@
 {
-  "name": "dsh-rigui",
-  "version": "0.2.0",
-  "description": "日晷 (Rigui) — a playful personal life workbench for DeepSeek Harness: sleep, food, workouts, spending and schedule on one page of cards that react to each other",
+  "name": "dsh-rigui-pro",
+  "version": "0.3.0",
+  "description": "日晷 Pro (Rigui Pro) — a personal life workbench for DeepSeek Harness with an AI butler: tell it what's on today and it lays out the day; it also keeps track of water, meals, shower, hair wash and sleep, and reminds you when it's time",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -26,14 +26,20 @@
     "health",
     "finance",
     "habit",
+    "schedule",
+    "reminder",
+    "assistant",
     "workbench"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AvenYQ/dsh-rigui.git"
+    "url": "git+https://github.com/fromzero1501/dsh-rigui-pro.git"
   },
-  "homepage": "https://github.com/AvenYQ/dsh-rigui#readme",
-  "author": "AvenYQ",
+  "homepage": "https://github.com/fromzero1501/dsh-rigui-pro#readme",
+  "author": "fromzero1501",
+  "contributors": [
+    "AvenYQ (original dsh-rigui)"
+  ],
   "license": "MIT",
   "scripts": {
     "build": "node build.mjs"

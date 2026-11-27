@@ -2,7 +2,7 @@ import React from 'react'
 import LifeApp from './App.jsx'
 import DialIcon from './icon.jsx'
 
-const PANEL = 'rigui'
+const PANEL = 'rigui-pro'
 
 function LifePanel() {
   return (
@@ -16,7 +16,7 @@ export const isPlugin = true
 export const inject = ['slots']
 export function apply(ctx) {
   ctx.slots.inject('sidebar.panellist', () =>
-    ctx.slots.register({ name: 'sidebar.panellist', id: PANEL, order: 5, label: () => '日晷' }, DialIcon))
+    ctx.slots.register({ name: 'sidebar.panellist', id: PANEL, order: 5, label: () => '日晷 Pro' }, DialIcon))
   ctx.slots.inject('main', () =>
     ctx.slots.register({ name: 'main', key: PANEL }, LifePanel))
 }

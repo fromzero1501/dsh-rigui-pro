@@ -1,6 +1,6 @@
-// 日晷 · 浏览器半边：DSH 左侧边栏里的「日晷」入口，点开是个人生活工作台。
+// 日晷 Pro · 浏览器半边：DSH 左侧边栏里的「日晷 Pro」，点开是个人生活工作台 + AI 管家。
 window.__ModuleLoader__.load({
-  id: 'dsh-rigui',
+  id: 'dsh-rigui-pro',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports
@@ -40,10 +40,10 @@ __export(plugin_exports, {
   isPlugin: () => isPlugin
 });
 module.exports = __toCommonJS(plugin_exports);
-var import_react10 = __toESM(require("react"));
+var import_react12 = __toESM(require("react"));
 
 // src/App.jsx
-var import_react8 = __toESM(require("react"));
+var import_react10 = __toESM(require("react"));
 
 // src/weather.jsx
 var import_react = __toESM(require("react"));
@@ -1332,6 +1332,17 @@ function derive(records, now = Date.now()) {
   });
   if (lastNight && !T.includes(lastNight)) groups.set(lastNight.id, { key: lastNight.id, t: lastNight.t + lastNight.hours * 36e5, items: [lastNight], wake: true });
   const timeline = [...groups.values()].sort((a, b) => b.t - a.t);
+  const rToday = {}, rLast = {};
+  records.forEach((r) => {
+    if (r.type !== "routine" || !r.kind) return;
+    if (!rLast[r.kind] || r.t > rLast[r.kind].t) rLast[r.kind] = r;
+    if (inDay(r, today)) {
+      const o = rToday[r.kind] || (rToday[r.kind] = { count: 0, ml: 0, lastAt: 0 });
+      o.count++;
+      o.ml += r.amount || 0;
+      if (r.t > o.lastAt) o.lastAt = r.t;
+    }
+  });
   const S2 = {
     now,
     today,
@@ -1365,7 +1376,8 @@ function derive(records, now = Date.now()) {
     next,
     todos,
     heat,
-    timeline
+    timeline,
+    routines: { today: rToday, last: rLast }
   };
   S2.insights = insights(S2, records);
   S2.nextAdvice = adviceFor(S2);
@@ -1625,6 +1637,7 @@ function seed(now = Date.now()) {
 }
 var MEAL_KEYS = /* @__PURE__ */ new Set(["breakfast", "lunch", "dinner", "snack"]);
 var CATS = /* @__PURE__ */ new Set(["餐饮", "交通", "购物", "居家", "订阅", "宠物", "运动", "医疗", "娱乐", "社交", "其他"]);
+var ROUTINE_NAME = { water: "喝水", shower: "洗澡", hair: "洗头", teeth: "刷牙", stretch: "活动一下", meal: "吃饭", sleep: "睡觉", medicine: "吃药", custom: "这件事" };
 var nOr = (v, d) => typeof v === "number" && isFinite(v) ? v : typeof v === "string" && v.trim() !== "" && isFinite(+v) ? +v : d;
 function fromAI(res, input, now = Date.now()) {
   const out = { tokens: [], records: [], effects: /* @__PURE__ */ new Set(), text: input, ai: true, note: res && res.note || "" };
@@ -1690,6 +1703,11 @@ function fromAI(res, input, now = Date.now()) {
       out.records.push({ id: uid(), type: "sleep", t: bed, hours: +hours.toFixed(2), title: "睡了 " + fmtHM(hours), ai: true });
     } else if (r.type === "weight" && nOr(r.kg, 0) > 20) {
       out.records.push({ id: uid(), type: "weight", t: at(r, 8) ?? now, kg: nOr(r.kg, 0), title: "体重 " + nOr(r.kg, 0) + " kg", ai: true });
+    } else if (r.type === "routine") {
+      const kind = String(r.kind || "custom").slice(0, 16);
+      if (!kind) continue;
+      const amount = nOr(r.amount, null);
+      out.records.push({ id: uid(), type: "routine", kind, t: at(r, 12) ?? now, amount: amount && amount > 0 ? Math.round(amount) : null, title: String(r.title || ROUTINE_NAME[kind] || "这件事").slice(0, 20), ai: true });
     } else if (r.type === "event" && r.title) {
       const base = dayOf(r.date);
       const t = hm2(r.start, base) ?? base + 9 * 36e5;
@@ -4650,6 +4668,254 @@ var GOALS_CSS = `
 @media (prefers-reduced-motion:reduce){.gl-sheet,.gl-card,.gl-ring .gl-band,.gl-target{animation:none!important;transition:none!important}.gl-ring .gl-band{stroke-dashoffset:0}}
 `;
 
+// src/plan.jsx
+var import_react8 = __toESM(require("react"));
+var CSS2 = `
+.rp-scrim{position:fixed;inset:0;z-index:60;background:rgba(16,20,24,.42);backdrop-filter:blur(3px);animation:rp-fade .18s ease both}
+.rp-wrap{position:fixed;z-index:61;left:50%;top:50%;transform:translate(-50%,-50%);width:min(720px,calc(100vw - 40px));max-height:min(86vh,880px);display:flex;flex-direction:column;
+  background:var(--card,#fff);color:var(--ink,#1F2328);border:1px solid var(--rule,rgba(31,35,40,.1));border-radius:22px;box-shadow:0 32px 80px rgba(16,20,24,.28);overflow:hidden;animation:rp-rise .26s cubic-bezier(.2,.8,.2,1) both}
+@keyframes rp-fade{from{opacity:0}to{opacity:1}}
+@keyframes rp-rise{from{opacity:0;transform:translate(-50%,-46%)}to{opacity:1;transform:translate(-50%,-50%)}}
+.rp-head{padding:22px 24px 14px;border-bottom:1px solid var(--rule,rgba(31,35,40,.08))}
+.rp-title{display:flex;align-items:baseline;gap:10px;font-size:20px;font-weight:600;letter-spacing:-.01em}
+.rp-title small{font-size:13px;font-weight:400;color:var(--ink2,#6B7280)}
+.rp-sum{margin-top:6px;font-size:14px;line-height:1.6;color:var(--ink2,#6B7280)}
+.rp-body{flex:1;overflow:auto;padding:6px 24px 16px}
+.rp-row{display:flex;gap:14px;padding:12px 0;border-bottom:1px solid var(--rule,rgba(31,35,40,.07));cursor:pointer;align-items:flex-start}
+.rp-row:last-child{border-bottom:0}
+.rp-row.off{opacity:.38}
+.rp-time{flex:none;width:96px;font-variant-numeric:tabular-nums;font-size:13.5px;color:var(--ink2,#6B7280);padding-top:2px}
+.rp-time b{display:block;font-size:15px;font-weight:600;color:var(--ink,#1F2328)}
+.rp-main{flex:1;min-width:0}
+.rp-name{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:500}
+.rp-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.rp-why{margin-top:3px;font-size:12.5px;line-height:1.55;color:var(--ink2,#6B7280)}
+.rp-tick{flex:none;width:22px;height:22px;border-radius:7px;border:1.5px solid var(--line,#D7DBE0);display:grid;place-items:center;margin-top:2px}
+.rp-row.off .rp-tick{border-color:transparent}
+.rp-row:not(.off) .rp-tick{background:#1E9E6A;border-color:#1E9E6A}
+.rp-notes{margin:4px 0 0;padding:12px 14px;border-radius:12px;background:rgba(242,153,74,.1);font-size:13px;line-height:1.6}
+.rp-q{margin:10px 0 0;padding:12px 14px;border-radius:12px;background:rgba(61,79,184,.1);font-size:13.5px;line-height:1.6}
+.rp-foot{padding:14px 24px 20px;border-top:1px solid var(--rule,rgba(31,35,40,.08));display:flex;flex-direction:column;gap:12px;background:var(--card,#fff)}
+.rp-ask{display:flex;gap:8px}
+.rp-ask input{flex:1;height:40px;border-radius:11px;border:1px solid var(--rule,rgba(31,35,40,.14));background:transparent;color:inherit;padding:0 12px;font:inherit;font-size:14px}
+.rp-ask input:focus{outline:2px solid rgba(242,153,74,.55);outline-offset:-1px}
+.rp-btns{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+.rp-btn{height:40px;padding:0 18px;border-radius:11px;border:1px solid var(--rule,rgba(31,35,40,.14));background:transparent;color:inherit;font:inherit;font-size:14px;cursor:pointer}
+.rp-btn:hover{background:rgba(31,35,40,.05)}
+.rp-btn.main{background:#1F2328;color:#F4F5F1;border-color:#1F2328;font-weight:600}
+.rp-btn.main:disabled{opacity:.45;cursor:default}
+.rp-empty{padding:34px 0;text-align:center;color:var(--ink2,#6B7280);font-size:14px;line-height:1.8}
+.rp-load{display:flex;flex-direction:column;gap:10px;padding:20px 0}
+.rp-skel{height:16px;border-radius:8px;background:var(--rule,rgba(31,35,40,.08));animation:rp-pulse 1.2s ease-in-out infinite}
+@keyframes rp-pulse{0%,100%{opacity:.5}50%{opacity:1}}
+`;
+var DOMAIN_COLOR = { admin: "#0E8A8A", work: "#3D4FB8", life: "#F2994A", move: "#1E9E6A", rest: "#7C5CE0" };
+var DOMAIN_NAME = { admin: "办事", work: "干活", life: "生活", move: "运动", rest: "休息" };
+var Tick = /* @__PURE__ */ import_react8.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "#fff", strokeWidth: "3.2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M5 12.5l4.5 4.5L19 7" }));
+function PlanPanel({ open, draft, date, busy, error, onClose, onAccept, onReplan }) {
+  const [off, setOff] = (0, import_react8.useState)({});
+  const [ask, setAsk] = (0, import_react8.useState)("");
+  const inputRef = (0, import_react8.useRef)(null);
+  (0, import_react8.useEffect)(() => {
+    if (open) {
+      setOff({});
+      setAsk("");
+    }
+  }, [open, draft && draft.date, draft && draft.summary]);
+  (0, import_react8.useEffect)(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  const blocks = draft && draft.blocks || [];
+  const kept = (0, import_react8.useMemo)(() => blocks.filter((b, i) => !off[i]), [blocks, off]);
+  if (!open) return null;
+  const toggle = (i) => setOff((o) => ({ ...o, [i]: !o[i] }));
+  const redo = () => {
+    if (busy) return;
+    onReplan(ask.trim());
+  };
+  const accept = () => {
+    if (busy || !kept.length) return;
+    onAccept(kept);
+  };
+  return /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("style", null, CSS2), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-scrim", onClick: onClose, "aria-hidden": "true" }), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-wrap", role: "dialog", "aria-modal": "true", "aria-label": "今天的安排" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-head" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-title" }, date ? date.slice(5).replace("-", " 月 ") + " 日" : "今天", "的安排", /* @__PURE__ */ import_react8.default.createElement("small", null, busy ? "正在排…" : blocks.length ? `排了 ${blocks.length} 件事，不想要的点掉` : "")), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-sum" }, draft && draft.summary ? draft.summary : busy ? "先看你的日程和习惯，再动手排。" : "还没排出来。")), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-body" }, busy && !blocks.length ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-load" }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "72%" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "54%" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "64%" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "44%" } })) : error ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-empty" }, error, /* @__PURE__ */ import_react8.default.createElement("br", null), "可以改一句要求再排一次。") : !blocks.length ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-empty" }, "这一天没有必须排进去的事。", /* @__PURE__ */ import_react8.default.createElement("br", null), "你可以说「上午写脚本、下午寄快递」，我再来排。") : /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, blocks.map((b, i) => /* @__PURE__ */ import_react8.default.createElement(
+    "div",
+    {
+      key: i,
+      className: "rp-row" + (off[i] ? " off" : ""),
+      role: "button",
+      tabIndex: 0,
+      "aria-pressed": !off[i],
+      onClick: () => toggle(i),
+      onKeyDown: (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggle(i);
+        }
+      }
+    },
+    /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-time" }, /* @__PURE__ */ import_react8.default.createElement("b", null, b.start), b.end),
+    /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-main" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-name" }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-dot", style: { background: DOMAIN_COLOR[b.domain] || "#6B7280" } }), b.title, /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 12, color: "var(--ink2,#6B7280)", fontWeight: 400 } }, DOMAIN_NAME[b.domain] || "")), b.why ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-why" }, b.why) : null),
+    /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-tick", "aria-hidden": "true" }, off[i] ? null : Tick)
+  )), draft && draft.question ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-q" }, draft.question) : null, draft && draft.notes && draft.notes.length ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-notes" }, draft.notes.map((n, i) => /* @__PURE__ */ import_react8.default.createElement("div", { key: i }, "· ", n))) : null)), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-foot" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-ask" }, /* @__PURE__ */ import_react8.default.createElement(
+    "input",
+    {
+      ref: inputRef,
+      value: ask,
+      placeholder: "要改哪里？比如「上午别排事，我起不来」",
+      onChange: (e) => setAsk(e.target.value),
+      onKeyDown: (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          redo();
+        }
+      }
+    }
+  ), /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "rp-btn", onClick: redo, disabled: busy }, busy ? "排…" : "重排")), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-btns" }, /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "rp-btn", onClick: onClose }, "先不排"), /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "rp-btn main", onClick: accept, disabled: busy || !kept.length }, kept.length ? `就按这 ${kept.length} 件走` : "没有要排的")))));
+}
+
+// src/habits.jsx
+var import_react9 = __toESM(require("react"));
+
+// src/habits.js
+var RULES_KEY = "dsh-rigui:rules";
+var DAY4 = 864e5;
+var ROUTINE = {
+  water: { name: "喝水", color: "#3B82C4", icon: "water", per: 250 },
+  shower: { name: "洗澡", color: "#3D4FB8", icon: "shower" },
+  hair: { name: "洗头", color: "#7C5CE0", icon: "hair" },
+  meal: { name: "吃饭", color: "#F2994A", icon: "meal" },
+  sleep: { name: "睡觉", color: "#3D4FB8", icon: "sleep" },
+  teeth: { name: "刷牙", color: "#0E8A8A", icon: "teeth" },
+  stretch: { name: "站起来走走", color: "#1E9E6A", icon: "stretch" },
+  custom: { name: "这件事", color: "#6B7280", icon: "dot" }
+};
+var routineName = (k) => (ROUTINE[k] || ROUTINE.custom).name;
+var DEFAULT_RULES = [
+  { id: "water", kind: "water", title: "喝水", mode: "interval", everyMin: 90, from: "09:00", to: "21:00", per: 250, enabled: true },
+  { id: "breakfast", kind: "meal", title: "吃早饭", mode: "fixed", times: ["07:30"], enabled: true },
+  { id: "lunch", kind: "meal", title: "吃午饭", mode: "fixed", times: ["12:00"], enabled: true },
+  { id: "dinner", kind: "meal", title: "吃晚饭", mode: "fixed", times: ["18:00"], enabled: true },
+  { id: "shower", kind: "shower", title: "洗澡", mode: "fixed", times: ["22:30"], enabled: true },
+  { id: "hair", kind: "hair", title: "洗头", mode: "gap", minGapDays: 3, at: "21:30", enabled: true },
+  { id: "sleep", kind: "sleep", title: "该睡了", mode: "fixed", times: ["23:30"], enabled: true }
+];
+function loadRules() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RULES_KEY));
+    if (Array.isArray(v) && v.length) {
+      const ids = new Set(v.map((r) => r && r.id));
+      return v.filter((r) => r && r.id).concat(DEFAULT_RULES.filter((r) => !ids.has(r.id)));
+    }
+  } catch (e) {
+  }
+  return DEFAULT_RULES.map((r) => ({ ...r }));
+}
+function saveRules(rules) {
+  try {
+    localStorage.setItem(RULES_KEY, JSON.stringify(rules));
+  } catch (e) {
+  }
+}
+var pad22 = (n) => (n < 10 ? "0" : "") + n;
+var fmtHM2 = (t) => {
+  const d = new Date(t);
+  return pad22(d.getHours()) + ":" + pad22(d.getMinutes());
+};
+function sinceLast(records, kind, now = Date.now()) {
+  let last = 0;
+  for (const r of records) if (r.type === "routine" && r.kind === kind && r.t > last) last = r.t;
+  if (!last) return null;
+  const ms = now - last;
+  return { at: last, ms, days: Math.floor(ms / DAY4), hours: ms / 36e5 };
+}
+function guessRoutine(text) {
+  const t = String(text || "");
+  if (/喝水|喝水了|喝了杯|喝了一杯|喝口水|喝水\d|补水/.test(t)) return "water";
+  if (/洗头|洗了头|洗个头/.test(t)) return "hair";
+  if (/洗澡|洗了个澡|冲了个澡|冲澡/.test(t)) return "shower";
+  if (/刷牙|刷了牙/.test(t)) return "teeth";
+  if (/站起来|走走|活动一下|伸展/.test(t)) return "stretch";
+  return null;
+}
+function guessWater(text) {
+  const t = String(text || "");
+  const ml = /(\d{3,4})\s*(?:ml|毫升)/i.exec(t);
+  if (ml) return +ml[1];
+  if (/一大杯|大杯/.test(t)) return 500;
+  if (/半杯/.test(t)) return 120;
+  if (/两杯|２杯|2\s*杯/.test(t)) return 500;
+  return 250;
+}
+function ruleLine(rules) {
+  return rules.filter((r) => r.enabled !== false).map((r) => {
+    if (r.mode === "fixed") return `${r.title} ${(r.times || []).join("/")}`;
+    if (r.mode === "interval") return `${r.title} 每 ${r.everyMin} 分钟（${r.from}–${r.to}）`;
+    if (r.mode === "gap") return `${r.title} 每 ${r.minGapDays} 天`;
+    return r.title;
+  }).join("；");
+}
+
+// src/habits.jsx
+var CSS3 = `
+.rh-chips{display:flex;flex-wrap:wrap;gap:8px}
+.rh-chip{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border-radius:11px;border:1px solid var(--rule,rgba(31,35,40,.12));background:transparent;color:inherit;font:inherit;font-size:13.5px;cursor:pointer;transition:transform .12s ease,background .12s ease}
+.rh-chip:hover{background:rgba(31,35,40,.05)}
+.rh-chip:active{transform:scale(.97)}
+.rh-chip.done{border-color:transparent;background:rgba(30,158,106,.14)}
+.rh-chip i{width:8px;height:8px;border-radius:50%;display:block}
+.rh-chip b{font-weight:600;font-variant-numeric:tabular-nums}
+.rh-cups{display:flex;align-items:flex-end;gap:5px;height:44px;margin:10px 0 4px}
+.rh-cup{width:11px;border-radius:3px 3px 1px 1px;background:var(--rule,rgba(31,35,40,.12));transition:background .25s ease,height .25s ease}
+.rh-cup.on{background:#3B82C4}
+.rh-line{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--ink2,#6B7280);margin-top:8px}
+.rh-next{display:flex;align-items:center;gap:6px}
+.rh-dot{width:6px;height:6px;border-radius:50%;background:#1E9E6A;flex:none;animation:rh-blink 2s ease-in-out infinite}
+@keyframes rh-blink{0%,100%{opacity:.35}50%{opacity:1}}
+.rh-rules{display:flex;flex-direction:column;gap:2px}
+.rh-rule{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--rule,rgba(31,35,40,.07))}
+.rh-rule:last-child{border-bottom:0}
+.rh-rule .n{flex:1;font-size:13.5px}
+.rh-rule .t{font-size:12px;color:var(--ink2,#6B7280);font-variant-numeric:tabular-nums}
+.rh-step{width:24px;height:24px;border-radius:8px;border:1px solid var(--rule,rgba(31,35,40,.14));background:transparent;color:inherit;font:inherit;line-height:1;cursor:pointer;font-size:14px}
+.rh-sw{width:38px;height:22px;border-radius:11px;border:0;background:var(--rule,rgba(31,35,40,.16));position:relative;cursor:pointer;flex:none;transition:background .18s ease}
+.rh-sw.on{background:#1E9E6A}
+.rh-sw::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:8px;background:#fff;transition:transform .18s cubic-bezier(.2,.8,.2,1)}
+.rh-sw.on::after{transform:translateX(16px)}
+.rh-stack{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:10px;width:min(430px,calc(100vw - 32px))}
+.rh-toast{background:#1F2328;color:#F4F5F1;border-radius:18px;padding:14px 16px;box-shadow:0 18px 44px rgba(16,20,24,.34);animation:rh-rise .32s cubic-bezier(.2,.8,.2,1) both}
+@keyframes rh-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.rh-toast .h{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600}
+.rh-toast .b{margin-top:3px;font-size:13px;line-height:1.55;color:rgba(244,245,241,.72)}
+.rh-toast .a{display:flex;gap:8px;margin-top:11px}
+.rh-toast .a button{height:32px;padding:0 13px;border-radius:9px;border:0;font:inherit;font-size:13px;cursor:pointer;background:rgba(255,255,255,.13);color:#F4F5F1}
+.rh-toast .a button.main{background:#F2994A;color:#1F2328;font-weight:600}
+`;
+var drop = (color, size = 8) => /* @__PURE__ */ import_react9.default.createElement("i", { style: { background: color }, "aria-hidden": "true" });
+function RoutineCard({ ctx }) {
+  const { S: S2, rules, onLog, next } = ctx;
+  const water = S2.routines && S2.routines.today && S2.routines.today.water || { count: 0, ml: 0, lastAt: 0 };
+  const shower = S2.routines && S2.routines.today && S2.routines.today.shower || null;
+  const hair = S2.routines && S2.routines.last && S2.routines.last.hair || null;
+  const hairDays = hair ? Math.floor((S2.now - hair.t) / 864e5) : null;
+  const cups = 8;
+  const filled = Math.min(cups, Math.round(water.ml / 250) || water.count);
+  const soon = (0, import_react9.useMemo)(() => (next || []).filter((n) => n.at > S2.now).sort((a, b) => a.at - b.at)[0], [next, S2.now]);
+  const hairRule = (rules || []).find((r) => r.id === "hair");
+  return /* @__PURE__ */ import_react9.default.createElement(import_react9.default.Fragment, null, /* @__PURE__ */ import_react9.default.createElement("style", null, CSS3), /* @__PURE__ */ import_react9.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 2 } }, /* @__PURE__ */ import_react9.default.createElement("h2", { className: "lf-h" }, "日常"), /* @__PURE__ */ import_react9.default.createElement("span", { className: "lf-sub" }, water.ml ? water.ml + " ml" : water.count ? water.count + " 次" : "还没记")), /* @__PURE__ */ import_react9.default.createElement("div", { className: "rh-cups", "aria-hidden": "true" }, Array.from({ length: cups }, (_, i) => /* @__PURE__ */ import_react9.default.createElement("span", { key: i, className: "rh-cup" + (i < filled ? " on" : ""), style: { height: 12 + i * 4 } }))), /* @__PURE__ */ import_react9.default.createElement("div", { className: "rh-chips" }, /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", className: "rh-chip" + (water.count ? " done" : ""), onClick: () => onLog("water"), title: "记一杯水" }, drop("#3B82C4"), "喝水 ", water.count ? /* @__PURE__ */ import_react9.default.createElement("b", null, water.count, " 次") : null), /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", className: "rh-chip" + (shower ? " done" : ""), onClick: () => onLog("shower"), title: "记一次洗澡" }, drop("#3D4FB8"), "洗澡"), /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", className: "rh-chip" + (hairDays != null && hairRule && hairDays < (hairRule.minGapDays || 3) ? " done" : ""), onClick: () => onLog("hair"), title: "记一次洗头" }, drop("#7C5CE0"), "洗头", hairDays != null ? /* @__PURE__ */ import_react9.default.createElement("b", null, hairDays, " 天前") : null)), /* @__PURE__ */ import_react9.default.createElement("div", { className: "rh-line" }, /* @__PURE__ */ import_react9.default.createElement("span", { className: "rh-next" }, soon ? /* @__PURE__ */ import_react9.default.createElement(import_react9.default.Fragment, null, /* @__PURE__ */ import_react9.default.createElement("span", { className: "rh-dot" }), fmtHM2(soon.at), " ", soon.title) : /* @__PURE__ */ import_react9.default.createElement("span", null, "今天的都过了")), water.lastAt ? /* @__PURE__ */ import_react9.default.createElement("span", null, fmtHM2(water.lastAt), " 喝过") : null));
+}
+function BackRoutine({ rules, onToggle, onEvery, onGap }) {
+  return /* @__PURE__ */ import_react9.default.createElement(import_react9.default.Fragment, null, /* @__PURE__ */ import_react9.default.createElement("style", null, CSS3), /* @__PURE__ */ import_react9.default.createElement("h2", { className: "lf-h", style: { marginBottom: 8 } }, "提醒怎么设"), /* @__PURE__ */ import_react9.default.createElement("div", { className: "rh-rules" }, (rules || []).map((r) => /* @__PURE__ */ import_react9.default.createElement("div", { className: "rh-rule", key: r.id }, /* @__PURE__ */ import_react9.default.createElement("span", { className: "n" }, r.title), r.mode === "interval" ? /* @__PURE__ */ import_react9.default.createElement("span", { className: "lf-row", style: { gap: 4 } }, /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onEvery(r.id, -15), "aria-label": "少十五分钟" }, "−"), /* @__PURE__ */ import_react9.default.createElement("span", { className: "t" }, r.everyMin, " 分钟"), /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onEvery(r.id, 15), "aria-label": "多十五分钟" }, "+")) : r.mode === "gap" ? /* @__PURE__ */ import_react9.default.createElement("span", { className: "lf-row", style: { gap: 4 } }, /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onGap(r.id, -1), "aria-label": "少一天" }, "−"), /* @__PURE__ */ import_react9.default.createElement("span", { className: "t" }, r.minGapDays, " 天"), /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onGap(r.id, 1), "aria-label": "多一天" }, "+")) : /* @__PURE__ */ import_react9.default.createElement("span", { className: "t" }, (r.times || []).join(" · ")), /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", className: "rh-sw" + (r.enabled !== false ? " on" : ""), onClick: () => onToggle(r.id), "aria-label": r.enabled !== false ? "关掉" : "打开", "aria-pressed": r.enabled !== false })))), /* @__PURE__ */ import_react9.default.createElement("p", { className: "lf-sub", style: { marginTop: 10, lineHeight: 1.6 } }, "点一下就记下，记完自动顺延；面板关着也会弹系统提醒。"));
+}
+function ReminderStack({ items, onDone, onSnooze, onSkip }) {
+  if (!items || !items.length) return null;
+  return /* @__PURE__ */ import_react9.default.createElement(import_react9.default.Fragment, null, /* @__PURE__ */ import_react9.default.createElement("style", null, CSS3), /* @__PURE__ */ import_react9.default.createElement("div", { className: "rh-stack", role: "status" }, items.slice(0, 2).map((a) => /* @__PURE__ */ import_react9.default.createElement("div", { className: "rh-toast", key: a.id }, /* @__PURE__ */ import_react9.default.createElement("div", { className: "h" }, /* @__PURE__ */ import_react9.default.createElement("span", { style: { width: 8, height: 8, borderRadius: 4, background: (ROUTINE[a.kind] || ROUTINE.custom).color } }), a.title), /* @__PURE__ */ import_react9.default.createElement("div", { className: "b" }, a.body), /* @__PURE__ */ import_react9.default.createElement("div", { className: "a" }, /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", className: "main", onClick: () => onDone(a) }, "做了"), /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", onClick: () => onSnooze(a, 15) }, "15 分钟后"), /* @__PURE__ */ import_react9.default.createElement("button", { type: "button", onClick: () => onSkip(a) }, "不用了"))))));
+}
+
 // src/App.jsx
 var KEY = "dsh-rigui:v1";
 var FOODS_KEY = "dsh-rigui:foods";
@@ -4670,16 +4936,20 @@ var loadMine = () => {
     return {};
   }
 };
+async function callHost(endpoint, payload, signal) {
+  const res = await fetch("api/rigui-pro", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint, payload }), signal });
+  if (!res.ok) throw new Error(res.status === 404 ? "AI 接口还没加载，重启一次 DSH" : "接口出错 " + res.status);
+  const j = await res.json();
+  if (!j.ok) throw new Error(j.error || "没给出结果");
+  return j;
+}
 async function askAI(text, mine, weightKg, signal) {
   const d = /* @__PURE__ */ new Date(), wk = "日一二三四五六"[d.getDay()];
   const nowStr = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0") + " 周" + wk;
-  const res = await fetch("api/rigui", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: "parse", payload: { text, now: nowStr, weightKg, mine } }), signal });
-  if (!res.ok) throw new Error(res.status === 404 ? "AI 接口还没加载，重启一次 DSH" : "AI 接口出错 " + res.status);
-  const j = await res.json();
-  if (!j.ok) throw new Error(j.error || "AI 没给出结果");
+  const j = await callHost("parse", { text, now: nowStr, weightKg, mine }, signal);
   return { result: j.result, model: j.model };
 }
-var C2 = { sleep: "#3D4FB8", move: "#1E9E6A", food: "#F2994A", money: "#7C5CE0", body: "#0E8A8A", time: "#1F2328", link: "#E5484D" };
+var C2 = { sleep: "#3D4FB8", move: "#1E9E6A", food: "#F2994A", money: "#7C5CE0", body: "#0E8A8A", time: "#1F2328", link: "#E5484D", routine: "#3B82C4" };
 function cardsFor(records, now = Date.now()) {
   const c = /* @__PURE__ */ new Set();
   const today = (t) => startOfDay(t) === startOfDay(now);
@@ -4718,11 +4988,15 @@ function cardsFor(records, now = Date.now()) {
       c.add("todos");
       if (r.amount) c.add("money");
     }
+    if (r.type === "routine") {
+      c.add("routine");
+      c.add("timeline");
+    }
   });
   if (records.length) c.add("insights");
   return c;
 }
-var CARD_COLOR = { energy: C2.food, dial: "#F4F5F1", timeline: C2.time, money: C2.money, move: C2.move, sleep: C2.sleep, next: C2.move, week: C2.time, todos: C2.time, body: C2.body, insights: C2.link };
+var CARD_COLOR = { energy: C2.food, dial: "#F4F5F1", timeline: C2.time, money: C2.money, move: C2.move, sleep: C2.sleep, next: C2.move, week: C2.time, todos: C2.time, body: C2.body, insights: C2.link, routine: "#3B82C4" };
 function load() {
   try {
     const v = JSON.parse(localStorage.getItem(KEY));
@@ -4732,9 +5006,9 @@ function load() {
   return { records: seed(Date.now()), sample: true };
 }
 function Num({ value, format = num, className = "lf-num", style }) {
-  const [shown, setShown] = (0, import_react8.useState)(value);
-  const from = (0, import_react8.useRef)(value);
-  (0, import_react8.useEffect)(() => {
+  const [shown, setShown] = (0, import_react10.useState)(value);
+  const from = (0, import_react10.useRef)(value);
+  (0, import_react10.useEffect)(() => {
     const a = from.current, b = value;
     if (a === b) return;
     const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4757,13 +5031,13 @@ function Num({ value, format = num, className = "lf-num", style }) {
       from.current = b;
     };
   }, [value]);
-  return /* @__PURE__ */ import_react8.default.createElement("span", { className, style }, format(shown));
+  return /* @__PURE__ */ import_react10.default.createElement("span", { className, style }, format(shown));
 }
 var Icon = {
-  send: /* @__PURE__ */ import_react8.default.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M5 12h14M13 6l6 6-6 6" })),
-  x: /* @__PURE__ */ import_react8.default.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M6 6l12 12M18 6L6 18" })),
-  check: /* @__PURE__ */ import_react8.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M5 12.5l4.5 4.5L19 7.5" })),
-  arrow: /* @__PURE__ */ import_react8.default.createElement("svg", { width: "12", height: "12", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M5 12h14M13 6l6 6-6 6" }))
+  send: /* @__PURE__ */ import_react10.default.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M5 12h14M13 6l6 6-6 6" })),
+  x: /* @__PURE__ */ import_react10.default.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M6 6l12 12M18 6L6 18" })),
+  check: /* @__PURE__ */ import_react10.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M5 12.5l4.5 4.5L19 7.5" })),
+  arrow: /* @__PURE__ */ import_react10.default.createElement("svg", { width: "12", height: "12", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M5 12h14M13 6l6 6-6 6" }))
 };
 function Dial({ S: S2, size = 380, hover, setHover }) {
   const c = size / 2, R = c - 42;
@@ -4796,11 +5070,11 @@ function Dial({ S: S2, size = 380, hover, setHover }) {
   for (let i = 0; i < 96; i++) {
     const h = i / 4, major = i % 24 === 0, hour = i % 4 === 0;
     const [x1, y1] = pt(major ? R + 20 : hour ? R + 25 : R + 28, h), [x2, y2] = pt(R + 32, h);
-    ticks.push(/* @__PURE__ */ import_react8.default.createElement("line", { key: i, x1, y1, x2, y2, stroke: major ? "#F4F5F1" : hour ? "rgba(244,245,241,.45)" : "rgba(244,245,241,.18)", strokeWidth: major ? 2 : 1, strokeLinecap: "round" }));
+    ticks.push(/* @__PURE__ */ import_react10.default.createElement("line", { key: i, x1, y1, x2, y2, stroke: major ? "#F4F5F1" : hour ? "rgba(244,245,241,.45)" : "rgba(244,245,241,.18)", strokeWidth: major ? 2 : 1, strokeLinecap: "round" }));
   }
   const [hx1, hy1] = pt(R - 18, now), [hx2, hy2] = pt(R + 36, now);
   const hv = hover && [...arcs, ...meals, ...spends].find((a) => a.k === hover);
-  return /* @__PURE__ */ import_react8.default.createElement("div", { style: { position: "relative", width: "100%", maxWidth: size, aspectRatio: "1 / 1", justifySelf: "center" } }, /* @__PURE__ */ import_react8.default.createElement("svg", { viewBox: `0 0 ${size} ${size}`, width: "100%", height: "100%", role: "img", "aria-label": "今天的 24 小时：" + arcs.map((a) => a.label).join("，") }, /* @__PURE__ */ import_react8.default.createElement("circle", { cx: c, cy: c, r: R, fill: "none", stroke: "rgba(255,255,255,.07)", strokeWidth: "20" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: arc(R, 0, now), fill: "none", stroke: "rgba(255,255,255,.1)", strokeWidth: "20", className: "lf-dialdraw", pathLength: "1" }), ticks, arcs.map((a, i) => /* @__PURE__ */ import_react8.default.createElement(
+  return /* @__PURE__ */ import_react10.default.createElement("div", { style: { position: "relative", width: "100%", maxWidth: size, aspectRatio: "1 / 1", justifySelf: "center" } }, /* @__PURE__ */ import_react10.default.createElement("svg", { viewBox: `0 0 ${size} ${size}`, width: "100%", height: "100%", role: "img", "aria-label": "今天的 24 小时：" + arcs.map((a) => a.label).join("，") }, /* @__PURE__ */ import_react10.default.createElement("circle", { cx: c, cy: c, r: R, fill: "none", stroke: "rgba(255,255,255,.07)", strokeWidth: "20" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: arc(R, 0, now), fill: "none", stroke: "rgba(255,255,255,.1)", strokeWidth: "20", className: "lf-dialdraw", pathLength: "1" }), ticks, arcs.map((a, i) => /* @__PURE__ */ import_react10.default.createElement(
     "path",
     {
       key: a.k,
@@ -4819,21 +5093,21 @@ function Dial({ S: S2, size = 380, hover, setHover }) {
     }
   )), meals.map((m, i) => {
     const [x, y] = pt(R - 30, m.h);
-    return /* @__PURE__ */ import_react8.default.createElement("circle", { key: m.k, cx: x, cy: y, r: hover === m.k ? 9 : 6.5, fill: C2.food, className: "lf-enter", style: { animationDelay: 0.9 + i * 0.08 + "s", cursor: "pointer", transition: "r .2s" }, onMouseMove: () => hover !== m.k && setHover(m.k), onMouseLeave: () => setHover(null) });
+    return /* @__PURE__ */ import_react10.default.createElement("circle", { key: m.k, cx: x, cy: y, r: hover === m.k ? 9 : 6.5, fill: C2.food, className: "lf-enter", style: { animationDelay: 0.9 + i * 0.08 + "s", cursor: "pointer", transition: "r .2s" }, onMouseMove: () => hover !== m.k && setHover(m.k), onMouseLeave: () => setHover(null) });
   }), spends.map((s, i) => {
     const [x, y] = pt(R - 50, s.h);
     const z = hover === s.k ? 13 : 9;
-    return /* @__PURE__ */ import_react8.default.createElement("rect", { key: s.k, x: x - z / 2, y: y - z / 2, width: z, height: z, rx: "2.5", fill: C2.money, className: "lf-enter", style: { animationDelay: 1 + i * 0.08 + "s", cursor: "pointer" }, onMouseMove: () => hover !== s.k && setHover(s.k), onMouseLeave: () => setHover(null) });
+    return /* @__PURE__ */ import_react10.default.createElement("rect", { key: s.k, x: x - z / 2, y: y - z / 2, width: z, height: z, rx: "2.5", fill: C2.money, className: "lf-enter", style: { animationDelay: 1 + i * 0.08 + "s", cursor: "pointer" }, onMouseMove: () => hover !== s.k && setHover(s.k), onMouseLeave: () => setHover(null) });
   }), [0, 6, 12, 18].map((h) => {
     const [x, y] = pt(R - 64, h);
-    return /* @__PURE__ */ import_react8.default.createElement("text", { key: h, x, y, textAnchor: "middle", dominantBaseline: "central", fontSize: "12", fill: "rgba(244,245,241,.5)" }, h);
-  }), /* @__PURE__ */ import_react8.default.createElement("line", { x1: hx1, y1: hy1, x2: hx2, y2: hy2, stroke: "#F4F5F1", strokeWidth: "3", strokeLinecap: "round" }), /* @__PURE__ */ import_react8.default.createElement("circle", { cx: hx2, cy: hy2, r: "6", fill: "#F4F5F1" }), /* @__PURE__ */ import_react8.default.createElement("circle", { cx: hx2, cy: hy2, r: "11", fill: "none", stroke: "#F4F5F1", strokeOpacity: ".4", style: { animation: "lf-breathe 2.4s ease-in-out infinite" } })), /* @__PURE__ */ import_react8.default.createElement("div", { style: { position: "absolute", inset: "32%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: 4, pointerEvents: "none" } }, hv ? /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 22, fontWeight: 600, color: "#F4F5F1", lineHeight: 1.15 } }, hv.label), /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.6)" } }, hv.sub)) : /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-num", style: { fontSize: 52, fontWeight: 500, color: "#F4F5F1", lineHeight: 1 } }, fmtTime(S2.now)), /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.6)" } }, "今天过去了 ", Math.round(now / 24 * 100), "%"))));
+    return /* @__PURE__ */ import_react10.default.createElement("text", { key: h, x, y, textAnchor: "middle", dominantBaseline: "central", fontSize: "12", fill: "rgba(244,245,241,.5)" }, h);
+  }), /* @__PURE__ */ import_react10.default.createElement("line", { x1: hx1, y1: hy1, x2: hx2, y2: hy2, stroke: "#F4F5F1", strokeWidth: "3", strokeLinecap: "round" }), /* @__PURE__ */ import_react10.default.createElement("circle", { cx: hx2, cy: hy2, r: "6", fill: "#F4F5F1" }), /* @__PURE__ */ import_react10.default.createElement("circle", { cx: hx2, cy: hy2, r: "11", fill: "none", stroke: "#F4F5F1", strokeOpacity: ".4", style: { animation: "lf-breathe 2.4s ease-in-out infinite" } })), /* @__PURE__ */ import_react10.default.createElement("div", { style: { position: "absolute", inset: "32%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: 4, pointerEvents: "none" } }, hv ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 22, fontWeight: 600, color: "#F4F5F1", lineHeight: 1.15 } }, hv.label), /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.6)" } }, hv.sub)) : /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-num", style: { fontSize: 52, fontWeight: 500, color: "#F4F5F1", lineHeight: 1 } }, fmtTime(S2.now)), /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.6)" } }, "今天过去了 ", Math.round(now / 24 * 100), "%"))));
 }
 function AiBadge({ status, model, error }) {
-  if (status === "wait" || status === "loading") return /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-row", style: { gap: 8 } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-think" }, /* @__PURE__ */ import_react8.default.createElement("i", null), /* @__PURE__ */ import_react8.default.createElement("i", null), /* @__PURE__ */ import_react8.default.createElement("i", null)), "AI 正在识别");
-  if (status === "done") return /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-row", style: { gap: 6 } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-dot", style: { background: "#5FD3A2" } }), "AI 识别", model ? " · " + model : "", "，数字不对可以直接改");
-  if (status === "error") return /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-row", style: { gap: 6 }, title: error }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-dot", style: { background: "#E5A84D" } }), "AI 暂时用不了（", error, "），先按本地规则");
-  return /* @__PURE__ */ import_react8.default.createElement("span", null, "本地预判");
+  if (status === "wait" || status === "loading") return /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 8 } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-think" }, /* @__PURE__ */ import_react10.default.createElement("i", null), /* @__PURE__ */ import_react10.default.createElement("i", null), /* @__PURE__ */ import_react10.default.createElement("i", null)), "AI 正在识别");
+  if (status === "done") return /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 6 } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-dot", style: { background: "#5FD3A2" } }), "AI 识别", model ? " · " + model : "", "，数字不对可以直接改");
+  if (status === "error") return /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 6 }, title: error }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-dot", style: { background: "#E5A84D" } }), "AI 暂时用不了（", error, "），先按本地规则");
+  return /* @__PURE__ */ import_react10.default.createElement("span", null, "本地预判");
 }
 var LAYOUT_KEY = "dsh-rigui:layout";
 var ROW_H = 116;
@@ -4842,6 +5116,7 @@ var WIDGETS = {
   energy: { name: "今天还能吃", w: 4, h: 2, minW: 3, minH: 2 },
   money: { name: "这个月还能花", w: 4, h: 2, minW: 3, minH: 2 },
   next: { name: "接下来", w: 4, h: 2, minW: 3, minH: 2 },
+  routine: { name: "日常", w: 4, h: 3, minW: 3, minH: 2 },
   timeline: { name: "今天记下的", w: 5, h: 6, minW: 4, minH: 3 },
   sleep: { name: "睡眠", w: 4, h: 3, minW: 3, minH: 3 },
   move: { name: "运动", w: 3, h: 3, minW: 3, minH: 2 },
@@ -4862,13 +5137,13 @@ function loadLayout() {
   }
   return DEFAULT_LAYOUT;
 }
-var LayoutCtx = import_react8.default.createContext(null);
-var FlipCtx = import_react8.default.createContext(null);
+var LayoutCtx = import_react10.default.createContext(null);
+var FlipCtx = import_react10.default.createContext(null);
 var clamp2 = (v, a, b) => Math.max(a, Math.min(b, v));
-var Corner = /* @__PURE__ */ import_react8.default.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M20 10v10H10" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M20 20l-7-7" }));
+var Corner = /* @__PURE__ */ import_react10.default.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M20 10v10H10" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M20 20l-7-7" }));
 function Card({ id, cls = "", bg, color, refs, flash, armed, hl, dim, children, idx = 0, style, floats, back, flipRef, tapFlip = true }) {
-  const [face, setFace] = (0, import_react8.useState)(0);
-  const flipping = (0, import_react8.useRef)(false);
+  const [face, setFace] = (0, import_react10.useState)(0);
+  const flipping = (0, import_react10.useRef)(false);
   const flip = () => {
     const n = el.current;
     if (!n || flipping.current) return;
@@ -4889,10 +5164,10 @@ function Card({ id, cls = "", bg, color, refs, flash, armed, hl, dim, children, 
       };
     };
   };
-  const faceRef = (0, import_react8.useRef)(0);
+  const faceRef = (0, import_react10.useRef)(0);
   faceRef.current = face;
   if (flipRef) flipRef.current = flip;
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (tapFlip || !face) return;
     const k = (e) => {
       if (e.target.closest && e.target.closest(".lf-wk-edit")) return;
@@ -4915,8 +5190,8 @@ function Card({ id, cls = "", bg, color, refs, flash, armed, hl, dim, children, 
     if (window.getSelection && String(window.getSelection())) return;
     flip();
   };
-  const el = (0, import_react8.useRef)(null);
-  (0, import_react8.useEffect)(() => {
+  const el = (0, import_react10.useRef)(null);
+  (0, import_react10.useEffect)(() => {
     const n = el.current;
     if (!flash || !n) return;
     n.classList.remove("lf-enter");
@@ -4926,16 +5201,16 @@ function Card({ id, cls = "", bg, color, refs, flash, armed, hl, dim, children, 
     const t = setTimeout(() => n.classList.remove("flash"), 1500);
     return () => clearTimeout(t);
   }, [flash]);
-  (0, import_react8.useEffect)(() => bindHover(el.current), []);
-  const [entered, setEntered] = (0, import_react8.useState)(false);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => bindHover(el.current), []);
+  const [entered, setEntered] = (0, import_react10.useState)(false);
+  (0, import_react10.useEffect)(() => {
     const t = setTimeout(() => setEntered(true), 1400);
     return () => clearTimeout(t);
   }, []);
-  const L = (0, import_react8.useContext)(LayoutCtx);
+  const L = (0, import_react10.useContext)(LayoutCtx);
   const W2 = L && WIDGETS[id];
-  const [clip, setClip] = (0, import_react8.useState)(false);
-  (0, import_react8.useEffect)(() => {
+  const [clip, setClip] = (0, import_react10.useState)(false);
+  (0, import_react10.useEffect)(() => {
     const n = el.current;
     if (!n || !W2) return;
     const ro = new ResizeObserver(() => setClip(n.scrollHeight > n.clientHeight + 2));
@@ -4945,7 +5220,7 @@ function Card({ id, cls = "", bg, color, refs, flash, armed, hl, dim, children, 
   }, [W2]);
   const lay = W2 ? L.place(id) : null;
   const dragging = W2 && L.active === id;
-  return /* @__PURE__ */ import_react8.default.createElement(
+  return /* @__PURE__ */ import_react10.default.createElement(
     "section",
     {
       ref: (n) => {
@@ -4962,9 +5237,9 @@ function Card({ id, cls = "", bg, color, refs, flash, armed, hl, dim, children, 
         W2 ? null : style
       )
     },
-    W2 ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-widget-body", style }, /* @__PURE__ */ import_react8.default.createElement(FlipCtx.Provider, { value: flip }, face && back ? back : children)) : face && back ? back : children,
-    W2 && back && /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "lf-flip", "aria-label": face ? "翻回正面" : "翻到背面，看看怎么算的", title: face ? "翻回去" : "看看怎么算的", onClick: flip }, /* @__PURE__ */ import_react8.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M20 11a8 8 0 0 0-14.3-4.9L4 8" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M4 3v5h5" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M4 13a8 8 0 0 0 14.3 4.9L20 16" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M20 21v-5h-5" }))),
-    W2 && /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement(
+    W2 ? /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-widget-body", style }, /* @__PURE__ */ import_react10.default.createElement(FlipCtx.Provider, { value: flip }, face && back ? back : children)) : face && back ? back : children,
+    W2 && back && /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "lf-flip", "aria-label": face ? "翻回正面" : "翻到背面，看看怎么算的", title: face ? "翻回去" : "看看怎么算的", onClick: flip }, /* @__PURE__ */ import_react10.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M20 11a8 8 0 0 0-14.3-4.9L4 8" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M4 3v5h5" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M4 13a8 8 0 0 0 14.3 4.9L20 16" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M20 21v-5h-5" }))),
+    W2 && /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement(
       "button",
       {
         type: "button",
@@ -4974,8 +5249,8 @@ function Card({ id, cls = "", bg, color, refs, flash, armed, hl, dim, children, 
         onPointerDown: (e) => L.startDrag(id, e),
         onKeyDown: (e) => L.keyMove(id, e)
       },
-      /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-grip-bar" })
-    ), /* @__PURE__ */ import_react8.default.createElement(
+      /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-grip-bar" })
+    ), /* @__PURE__ */ import_react10.default.createElement(
       "button",
       {
         type: "button",
@@ -4986,19 +5261,19 @@ function Card({ id, cls = "", bg, color, refs, flash, armed, hl, dim, children, 
         onKeyDown: (e) => L.keyResize(id, e)
       },
       Corner
-    ), L.resizing === id && /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-size-tag" }, lay.w, " × ", lay.h)),
-    /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sheen", "aria-hidden": "true" }),
-    floats && floats.map((f, k) => /* @__PURE__ */ import_react8.default.createElement("span", { key: f.id, className: "lf-float", style: { color: f.color, top: 64 + k * 28 } }, f.text))
+    ), L.resizing === id && /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-size-tag" }, lay.w, " × ", lay.h)),
+    /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sheen", "aria-hidden": "true" }),
+    floats && floats.map((f, k) => /* @__PURE__ */ import_react10.default.createElement("span", { key: f.id, className: "lf-float", style: { color: f.color, top: 64 + k * 28 } }, f.text))
   );
 }
 function LifeApp() {
-  const [, setSunTick] = (0, import_react8.useState)(0);
-  (0, import_react8.useEffect)(() => {
+  const [, setSunTick] = (0, import_react10.useState)(0);
+  (0, import_react10.useEffect)(() => {
     const iv = setInterval(() => setSunTick((x) => x + 1), 3e4);
     return () => clearInterval(iv);
   }, []);
   const sunInfo = rgSunInfo(Date.now());
-  const [ovr, setOvr] = (0, import_react8.useState)(() => {
+  const [ovr, setOvr] = (0, import_react10.useState)(() => {
     try {
       const o = JSON.parse(localStorage.getItem("rigui-theme2"));
       return o && o.until > Date.now() ? o : null;
@@ -5008,18 +5283,18 @@ function LifeApp() {
   });
   const isDark = ovr && ovr.until > Date.now() ? ovr.t === "dark" : sunInfo.dark;
   window.__rgDark = isDark;
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     window.dispatchEvent(new Event("rg-theme"));
   }, [isDark]);
-  const themeRef = (0, import_react8.useRef)(null), skyRef = (0, import_react8.useRef)(null), skyOrigin = (0, import_react8.useRef)(null), themingT = (0, import_react8.useRef)(0), skyApi = (0, import_react8.useRef)(null);
-  (0, import_react8.useEffect)(() => {
+  const themeRef = (0, import_react10.useRef)(null), skyRef = (0, import_react10.useRef)(null), skyOrigin = (0, import_react10.useRef)(null), themingT = (0, import_react10.useRef)(0), skyApi = (0, import_react10.useRef)(null);
+  (0, import_react10.useEffect)(() => {
     const el = skyRef.current;
     if (!el) return;
     const api2 = rgStarSky(el);
     skyApi.current = api2;
     return () => api2.stop();
   }, []);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     const api2 = skyApi.current;
     if (!api2) return;
     const o = skyOrigin.current;
@@ -5045,25 +5320,30 @@ function LifeApp() {
     }
     setOvr(o);
   };
-  const [db, setDb] = (0, import_react8.useState)(load);
-  const [now, setNow] = (0, import_react8.useState)(Date.now());
-  const [text, setText] = (0, import_react8.useState)("");
-  const [mine, setMine] = (0, import_react8.useState)(loadMine);
-  const [ai, setAi] = (0, import_react8.useState)({ text: "", status: "idle" });
-  const [edits, setEdits] = (0, import_react8.useState)({});
-  const aiCache = (0, import_react8.useRef)(/* @__PURE__ */ new Map()), aiInflight = (0, import_react8.useRef)(/* @__PURE__ */ new Map()), S0 = (0, import_react8.useRef)({}), mineRef = (0, import_react8.useRef)({});
-  const [hover, setHover] = (0, import_react8.useState)(null);
-  const [threads, setThreads] = (0, import_react8.useState)(null);
-  const [flash, setFlash] = (0, import_react8.useState)({});
-  const [focusInsight, setFocusInsight] = (0, import_react8.useState)(null);
-  const [geo, setGeo] = (0, import_react8.useState)({ w: 0, h: 0 });
-  const [toast, setToast] = (0, import_react8.useState)(null);
-  const rootRef = (0, import_react8.useRef)(null), inputRef = (0, import_react8.useRef)(null), refs = (0, import_react8.useRef)({});
-  (0, import_react8.useEffect)(() => {
+  const [db, setDb] = (0, import_react10.useState)(load);
+  const [now, setNow] = (0, import_react10.useState)(Date.now());
+  const [text, setText] = (0, import_react10.useState)("");
+  const [mine, setMine] = (0, import_react10.useState)(loadMine);
+  const [ai, setAi] = (0, import_react10.useState)({ text: "", status: "idle" });
+  const [edits, setEdits] = (0, import_react10.useState)({});
+  const aiCache = (0, import_react10.useRef)(/* @__PURE__ */ new Map()), aiInflight = (0, import_react10.useRef)(/* @__PURE__ */ new Map()), S0 = (0, import_react10.useRef)({}), mineRef = (0, import_react10.useRef)({});
+  const [hover, setHover] = (0, import_react10.useState)(null);
+  const [threads, setThreads] = (0, import_react10.useState)(null);
+  const [flash, setFlash] = (0, import_react10.useState)({});
+  const [focusInsight, setFocusInsight] = (0, import_react10.useState)(null);
+  const [geo, setGeo] = (0, import_react10.useState)({ w: 0, h: 0 });
+  const [toast, setToast] = (0, import_react10.useState)(null);
+  const [rules, setRules] = (0, import_react10.useState)(loadRules);
+  const [reminders, setReminders] = (0, import_react10.useState)([]);
+  const [reminderNext, setReminderNext] = (0, import_react10.useState)([]);
+  const [coachLines, setCoachLines] = (0, import_react10.useState)([]);
+  const [plan, setPlan] = (0, import_react10.useState)({ open: false, busy: false, draft: null, error: "", date: "", text: "" });
+  const rootRef = (0, import_react10.useRef)(null), inputRef = (0, import_react10.useRef)(null), refs = (0, import_react10.useRef)({});
+  (0, import_react10.useEffect)(() => {
     const t = setInterval(() => setNow(Date.now()), 3e4);
     return () => clearInterval(t);
   }, []);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (document.querySelector("link[data-lf-font]")) return;
     const l = document.createElement("link");
     l.rel = "stylesheet";
@@ -5071,13 +5351,13 @@ function LifeApp() {
     l.setAttribute("data-lf-font", "");
     document.head.appendChild(l);
   }, []);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     try {
       localStorage.setItem(KEY, JSON.stringify(db));
     } catch (e) {
     }
   }, [db]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     const k = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -5087,7 +5367,7 @@ function LifeApp() {
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, []);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     const root = rootRef.current;
     if (!root) return;
     let t, on = false;
@@ -5115,22 +5395,22 @@ function LifeApp() {
       clearTimeout(t);
     };
   }, []);
-  (0, import_react8.useLayoutEffect)(() => {
+  (0, import_react10.useLayoutEffect)(() => {
     const el = rootRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => setGeo({ w: el.clientWidth, h: el.offsetHeight }));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const [goals, setGoalsState] = (0, import_react8.useState)(loadGoals);
-  const [goalsOpen, setGoalsOpen] = (0, import_react8.useState)(false);
-  (0, import_react8.useEffect)(() => {
+  const [goals, setGoalsState] = (0, import_react10.useState)(loadGoals);
+  const [goalsOpen, setGoalsOpen] = (0, import_react10.useState)(false);
+  (0, import_react10.useEffect)(() => {
     try {
       localStorage.setItem(GOALS_KEY, JSON.stringify(goals));
     } catch (e) {
     }
   }, [goals]);
-  (0, import_react8.useMemo)(() => {
+  (0, import_react10.useMemo)(() => {
     const g = {};
     NUM_KEYS.forEach((k) => {
       if (goals[k] != null) g[k] = goals[k];
@@ -5144,14 +5424,14 @@ function LifeApp() {
       return null;
     }
   })();
-  const [wTick, setWTick] = (0, import_react8.useState)(0);
-  (0, import_react8.useEffect)(() => {
+  const [wTick, setWTick] = (0, import_react10.useState)(0);
+  (0, import_react10.useEffect)(() => {
     const iv = setInterval(() => setWTick((x) => x + 1), 6e4);
     return () => clearInterval(iv);
   }, []);
-  (0, import_react8.useMemo)(() => setWeather(weatherW), [wTick, weatherW && weatherW.at]);
-  const S2 = (0, import_react8.useMemo)(() => derive(db.records, now), [db.records, now, goals, weatherW && weatherW.at]);
-  const suggestions = (0, import_react8.useMemo)(() => suggestGoals(S2, db.records), [S2, db.records]);
+  (0, import_react10.useMemo)(() => setWeather(weatherW), [wTick, weatherW && weatherW.at]);
+  const S2 = (0, import_react10.useMemo)(() => derive(db.records, now), [db.records, now, goals, weatherW && weatherW.at]);
+  const suggestions = (0, import_react10.useMemo)(() => suggestGoals(S2, db.records), [S2, db.records]);
   const adoptGoal = (sg, v) => setGoalsState((g) => {
     const n = { ...g, adopted: { ...g.adopted, [sg.id]: true }, texts: { ...g.texts } };
     if (sg.num) n[sg.num.key] = v;
@@ -5165,15 +5445,15 @@ function LifeApp() {
     else delete n.texts[sg.id];
     return n;
   });
-  const [rootRect, setRootRect] = (0, import_react8.useState)(null);
+  const [rootRect, setRootRect] = (0, import_react10.useState)(null);
   const openGoals = () => {
     const r = rootRef.current && rootRef.current.getBoundingClientRect();
     setRootRect(r ? { left: r.left, width: r.width } : null);
     setGoalsOpen(true);
   };
-  const usual = (0, import_react8.useMemo)(() => frequent(db.records, now), [db.records, now]);
-  const ghosts = (0, import_react8.useMemo)(() => ghostSlots(db.records, now), [db.records, now]);
-  const [sayFocus, setSayFocus] = (0, import_react8.useState)(false);
+  const usual = (0, import_react10.useMemo)(() => frequent(db.records, now), [db.records, now]);
+  const ghosts = (0, import_react10.useMemo)(() => ghostSlots(db.records, now), [db.records, now]);
+  const [sayFocus, setSayFocus] = (0, import_react10.useState)(false);
   const sayHint = (() => {
     const nowH = (now - S2.today) / 36e5;
     const due = ghosts.filter((g) => g.h <= nowH).sort((a, b) => b.h - a.h)[0];
@@ -5190,16 +5470,16 @@ function LifeApp() {
     }, 280);
   };
   S0.current = S2;
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     try {
       localStorage.setItem(FOODS_KEY, JSON.stringify(mine));
     } catch (e) {
     }
   }, [mine]);
-  const [settled, setSettled] = (0, import_react8.useState)("");
-  const composing = (0, import_react8.useRef)(false), [compTick, setCompTick] = (0, import_react8.useState)(0);
-  const ctrl = (0, import_react8.useRef)(null);
-  const runAI = (0, import_react8.useCallback)((t, own) => {
+  const [settled, setSettled] = (0, import_react10.useState)("");
+  const composing = (0, import_react10.useRef)(false), [compTick, setCompTick] = (0, import_react10.useState)(0);
+  const ctrl = (0, import_react10.useRef)(null);
+  const runAI = (0, import_react10.useCallback)((t, own) => {
     const key = t.trim();
     if (aiCache.current.has(key)) return Promise.resolve(aiCache.current.get(key));
     if (aiInflight.current.has(key)) return aiInflight.current.get(key);
@@ -5217,7 +5497,7 @@ function LifeApp() {
     return p;
   }, []);
   mineRef.current = mine;
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     const key = text.trim();
     if (!key) {
       setSettled("");
@@ -5227,7 +5507,7 @@ function LifeApp() {
     const t = setTimeout(() => setSettled(key), 800);
     return () => clearTimeout(t);
   }, [text, compTick]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     const key = settled;
     setEdits({});
     if (key.length < 2) {
@@ -5244,7 +5524,7 @@ function LifeApp() {
     });
   }, [settled, runAI]);
   const typing = text.trim() !== settled;
-  const preview = (0, import_react8.useMemo)(() => {
+  const preview = (0, import_react10.useMemo)(() => {
     const key = settled;
     let base = ai.text === key && ai.status === "done" ? fromAI(ai.result, key, now) : parse(key, now, mine);
     if (ai.text === key && ai.status === "done" && !base.records.length) base = parse(key, now, mine);
@@ -5261,11 +5541,11 @@ function LifeApp() {
     setEdits((e) => ({ ...e, [item.name]: kcal }));
     setMine((m) => ({ ...m, [item.name]: Math.round(kcal / (item.qty || 1)) }));
   };
-  const [busy, setBusy] = (0, import_react8.useState)(false);
-  const armedCards = (0, import_react8.useMemo)(() => {
+  const [busy, setBusy] = (0, import_react10.useState)(false);
+  const armedCards = (0, import_react10.useMemo)(() => {
     return cardsFor(preview.records, now);
   }, [preview]);
-  const pathBetween = (0, import_react8.useCallback)((fromEl, toEl) => {
+  const pathBetween = (0, import_react10.useCallback)((fromEl, toEl) => {
     const root = rootRef.current;
     if (!root || !fromEl || !toEl) return null;
     const R = root.getBoundingClientRect(), a = fromEl.getBoundingClientRect(), b = toEl.getBoundingClientRect();
@@ -5279,7 +5559,7 @@ function LifeApp() {
     const k = Math.max(40, (bx - sx) * 0.5);
     return `M${sx} ${sy} C${sx + k} ${sy}, ${bx - k} ${by}, ${bx} ${by}`;
   }, []);
-  const centerPath = (0, import_react8.useCallback)((aEl, bEl) => {
+  const centerPath = (0, import_react10.useCallback)((aEl, bEl) => {
     const root = rootRef.current;
     if (!root || !aEl || !bEl) return null;
     const R = root.getBoundingClientRect(), a = aEl.getBoundingClientRect(), b = bEl.getBoundingClientRect();
@@ -5287,9 +5567,9 @@ function LifeApp() {
     const mx = (ax + bx) / 2, my = (ay + by) / 2 - Math.abs(bx - ax) * 0.18 - 30;
     return `M${ax} ${ay} Q${mx} ${my} ${bx} ${by}`;
   }, []);
-  const [pulse, setPulse] = (0, import_react8.useState)({ pour: 0, shake: 0, coin: 0 });
-  const prevS = (0, import_react8.useRef)(null);
-  (0, import_react8.useEffect)(() => {
+  const [pulse, setPulse] = (0, import_react10.useState)({ pour: 0, shake: 0, coin: 0 });
+  const prevS = (0, import_react10.useRef)(null);
+  (0, import_react10.useEffect)(() => {
     const p = prevS.current;
     prevS.current = { kcalIn: 0, allowance: 0, todaySpent: 0 };
     if (S2) prevS.current = { kcalIn: S2.kcalIn, allowance: S2.allowance, todaySpent: S2.todaySpent };
@@ -5300,8 +5580,8 @@ function LifeApp() {
     if (S2.todaySpent > p.todaySpent) next.coin = Date.now();
     if (Object.keys(next).length) setTimeout(() => setPulse((cur) => ({ ...cur, ...next })), 420);
   }, [S2.kcalIn, S2.allowance, S2.todaySpent]);
-  const [floats, setFloats] = (0, import_react8.useState)([]);
-  const addFloats = (0, import_react8.useCallback)((list, delay = 450) => {
+  const [floats, setFloats] = (0, import_react10.useState)([]);
+  const addFloats = (0, import_react10.useCallback)((list, delay = 450) => {
     if (!list.length) return;
     setTimeout(() => {
       const items = list.map((f, i) => ({ ...f, id: Date.now() + "-" + i + Math.random() }));
@@ -5324,8 +5604,8 @@ function LifeApp() {
     });
     return out;
   };
-  const [bursts, setBursts] = (0, import_react8.useState)([]);
-  const celebrate = (0, import_react8.useCallback)((x, y, big) => {
+  const [bursts, setBursts] = (0, import_react10.useState)([]);
+  const celebrate = (0, import_react10.useCallback)((x, y, big) => {
     if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const colors = ["#F2994A", "#7C5CE0", "#1E9E6A", "#3D4FB8", "#0E8A8A", "#E5484D", "#F7C948"];
     const n = big ? 46 : 18;
@@ -5338,7 +5618,7 @@ function LifeApp() {
     setBursts((cur) => cur.concat(b));
     setTimeout(() => setBursts((cur) => cur.filter((z) => z !== b)), big ? 1600 : 1100);
   }, []);
-  const commit = (0, import_react8.useCallback)((newRecords, cards, removeIds) => {
+  const commit = (0, import_react10.useCallback)((newRecords, cards, removeIds) => {
     setDb((d) => ({ ...d, records: d.records.filter((r) => !(removeIds || []).includes(r.id)).concat(newRecords) }));
     const src = inputRef.current;
     const lines = [...cards].map((c) => ({ id: c, d: pathBetween(src, refs.current[c]), color: CARD_COLOR[c] === "#F4F5F1" ? C2.food : CARD_COLOR[c] })).filter((l) => l.d);
@@ -5358,10 +5638,155 @@ function LifeApp() {
     setToast(msg);
     setTimeout(() => setToast((t) => t === msg ? null : t), ms);
   };
+  const pushRoutine = (0, import_react10.useCallback)((payload) => callHost("routine", payload).then((j) => {
+    if (j && j.result) {
+      setReminders(j.result.due || []);
+      setReminderNext(j.result.next || []);
+    }
+    return j;
+  }).catch(() => null), []);
+  const logRoutine = (0, import_react10.useCallback)((kind, amount) => {
+    const t = Date.now();
+    const ml = kind === "water" ? amount || 250 : null;
+    const rec = { id: uid(), type: "routine", kind, t, amount: ml, title: routineName(kind) + (ml ? " " + ml + " ml" : "") };
+    commit([rec], /* @__PURE__ */ new Set(["routine", "timeline", "dial"]));
+    say(ml ? "记下了：" + routineName(kind) + " " + ml + " ml" : "记下了：" + routineName(kind));
+    pushRoutine({ action: "log", kind, at: t, amount: ml });
+  }, [commit, pushRoutine]);
+  (0, import_react10.useEffect)(() => {
+    saveRules(rules);
+    pushRoutine({ action: "rules", rules });
+  }, [rules, pushRoutine]);
+  (0, import_react10.useEffect)(() => {
+    const since = Date.now() - 14 * 864e5;
+    const logs = db.records.filter((r) => r.type === "routine" && r.t >= since).map((r) => ({ kind: r.kind, at: r.t, amount: r.amount || null }));
+    if (logs.length) pushRoutine({ action: "logs", logs });
+  }, []);
+  (0, import_react10.useEffect)(() => {
+    const tick2 = () => pushRoutine({ action: "state" });
+    tick2();
+    const iv = setInterval(tick2, 25e3);
+    const onVis = () => {
+      if (!document.hidden) tick2();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [pushRoutine]);
+  const reminderDone = (a) => {
+    setReminders((r) => r.filter((x) => x.id !== a.id));
+    logRoutine(a.kind || "custom");
+    pushRoutine({ action: "ack", ids: [a.id] });
+  };
+  const reminderSnooze = (a, m) => {
+    setReminders((r) => r.filter((x) => x.id !== a.id));
+    pushRoutine({ action: "snooze", ids: [a.id], minutes: m });
+  };
+  const reminderSkip = (a) => {
+    setReminders((r) => r.filter((x) => x.id !== a.id));
+    pushRoutine({ action: "ack", ids: [a.id] });
+  };
+  const wantsPlan = (s) => /(安排|排一下|排下|排个|计划|规划|时间表|怎么过|帮我排|做个日程)/.test(s);
+  const planPayload = (text2, constraint) => {
+    const d = /* @__PURE__ */ new Date();
+    const p2 = (n) => String(n).padStart(2, "0");
+    const ymd = d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate());
+    const hm2 = (t) => {
+      const x = new Date(t);
+      return p2(x.getHours()) + ":" + p2(x.getMinutes());
+    };
+    const w = (() => {
+      try {
+        return JSON.parse(localStorage.getItem("dsh-rigui:weather"));
+      } catch (e) {
+        return null;
+      }
+    })();
+    const busy2 = S2.events.filter((e) => e.t >= S2.today && e.t < S2.today + 864e5).map((e) => ({ start: hm2(e.t), end: hm2(e.end || e.t + 36e5), title: e.title }));
+    return {
+      date: ymd,
+      weekday: "日一二三四五六"[d.getDay()],
+      now: ymd + " " + hm2(Date.now()) + " 周" + "日一二三四五六"[d.getDay()],
+      text: text2,
+      constraint: constraint || "",
+      busy: busy2,
+      todos: S2.todos.filter((t) => !t.done).map((t) => ({ title: t.title, amount: t.amount || null })),
+      lastNight: S2.lastNight ? S2.lastNight.hours : null,
+      goals: { kcal: GOALS.kcal, sleep: GOALS.sleep, workoutsPerWeek: GOALS.workoutsPerWeek },
+      weather: w && w.w ? w.w.temp + "°" + (w.w.rainSoon ? "，一小时内可能下雨" : "") : "",
+      routineLine: ruleLine(rules),
+      profile: "自己做生意的人（直播带货、抖店客服），时间自己安排，不是上班族"
+    };
+  };
+  const openPlan = (0, import_react10.useCallback)(async (text2, constraint) => {
+    const payload = planPayload(text2, constraint);
+    setPlan({ open: true, busy: true, draft: null, error: "", date: payload.date, text: text2 });
+    try {
+      const j = await callHost(constraint ? "replan" : "plan", payload);
+      setPlan((p) => ({ ...p, busy: false, draft: j.result }));
+    } catch (err) {
+      setPlan((p) => ({ ...p, busy: false, error: String(err && err.message || err) }));
+    }
+  }, [S2, rules]);
+  const acceptPlan = (blocks) => {
+    const recs = blocks.map((b) => ({ id: uid(), type: "event", t: b.t, end: b.endT, title: b.title, domain: b.domain === "move" ? "move" : "time", ...b.domain === "move" ? { minutes: Math.max(5, Math.round((b.endT - b.t) / 6e4)), kcal: 300 } : {}, why: b.why, planned: true, ai: true }));
+    commit(recs, /* @__PURE__ */ new Set(["week", "next", "timeline", "dial"]));
+    setPlan({ open: false, busy: false, draft: null, error: "", date: "", text: "" });
+    say("排好了，" + recs.length + " 件");
+  };
+  const toggleRule = (id) => setRules((rs) => rs.map((r) => r.id === id ? { ...r, enabled: r.enabled === false } : r));
+  const bumpEvery = (id, d) => setRules((rs) => rs.map((r) => r.id === id ? { ...r, everyMin: Math.max(15, Math.min(720, (r.everyMin || 90) + d)) } : r));
+  const bumpGap = (id, d) => setRules((rs) => rs.map((r) => r.id === id ? { ...r, minGapDays: Math.max(1, Math.min(30, (r.minGapDays || 3) + d)) } : r));
+  (0, import_react10.useEffect)(() => {
+    let alive = true;
+    const run2 = () => {
+      const s = S0.current || {};
+      const d = /* @__PURE__ */ new Date(), p2 = (n) => String(n).padStart(2, "0");
+      const w = (() => {
+        try {
+          return JSON.parse(localStorage.getItem("dsh-rigui:weather"));
+        } catch (e) {
+          return null;
+        }
+      })();
+      const water = sinceLast(db.records, "water", Date.now());
+      const hair = sinceLast(db.records, "hair", Date.now());
+      callHost("coach", {
+        now: d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()) + " " + p2(d.getHours()) + ":" + p2(d.getMinutes()),
+        kcalIn: s.kcalIn || 0,
+        kcal: GOALS.kcal,
+        spent: s.spent || 0,
+        budget: GOALS.budget,
+        moveMin: s.weekMinutes || 0,
+        lastNight: s.lastNight ? s.lastNight.hours : null,
+        water: water && water.days === 0 ? s.routines && s.routines.today && s.routines.today.water ? s.routines.today.water.count : null : 0,
+        hairDays: hair ? hair.days : null,
+        nextEvent: s.next ? s.next.title : "",
+        todoLeft: s.todos ? s.todos.filter((t) => !t.done).length : null,
+        weather: w && w.w ? w.w.temp + "°" : ""
+      }).then((j) => {
+        if (alive) setCoachLines(j.result && j.result.lines || []);
+      }).catch(() => {
+      });
+    };
+    run2();
+    const iv = setInterval(run2, 45 * 6e4);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, []);
   const submit = async (e) => {
     e && e.preventDefault();
     const key = text.trim();
     if (!key || busy) return;
+    if (wantsPlan(key)) {
+      setText("");
+      openPlan(key);
+      return;
+    }
     let p = settled === key && aiFor !== "loading" ? preview : parse(text, Date.now(), mine);
     if (settled !== key || aiFor !== "done" && aiFor !== "error") {
       setBusy(true);
@@ -5373,10 +5798,18 @@ function LifeApp() {
       }
     }
     if (!p.records.length) {
+      const rk = guessRoutine(text);
+      if (rk) {
+        logRoutine(rk, rk === "water" ? guessWater(text) : null);
+        setText("");
+        return;
+      }
       say("没听懂这句。换个说法试试，比如「早饭 两个麻团 一杯豆浆 8」", 3600);
       return;
     }
     commit(p.records, cardsFor(p.records));
+    const rr = p.records.filter((r) => r.type === "routine");
+    if (rr.length) pushRoutine({ action: "logs", logs: rr.map((r) => ({ kind: r.kind, at: r.t, amount: r.amount || null })) });
     say(summaryOf(p.records));
     setText("");
   };
@@ -5389,7 +5822,7 @@ function LifeApp() {
     setDb((d) => ({ ...d, records: d.records.map((r) => r.id === ev.id ? { ...r, done: true } : r) }));
     commit([w], /* @__PURE__ */ new Set([...cardsFor([w]), "next", "week"]));
   };
-  const [allDoneAt, setAllDoneAt] = (0, import_react8.useState)(null);
+  const [allDoneAt, setAllDoneAt] = (0, import_react10.useState)(null);
   const toggleTodo = (t, ev) => {
     if (t.done) setAllDoneAt(null);
     const flip = (d) => d.records.map((r) => r.id === t.id ? { ...r, done: !r.done, doneAt: r.done ? void 0 : Date.now() } : r);
@@ -5410,14 +5843,14 @@ function LifeApp() {
       commit([], /* @__PURE__ */ new Set(["todos", "money", "insights"]));
     } else setDb((d) => ({ ...d, records: flip(d) }));
   };
-  const [confirm, setConfirm] = (0, import_react8.useState)(null);
-  const [undo, setUndo] = (0, import_react8.useState)(null);
-  (0, import_react8.useEffect)(() => {
+  const [confirm, setConfirm] = (0, import_react10.useState)(null);
+  const [undo, setUndo] = (0, import_react10.useState)(null);
+  (0, import_react10.useEffect)(() => {
     if (!confirm) return;
     const t = setTimeout(() => setConfirm(null), 6e3);
     return () => clearTimeout(t);
   }, [confirm]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (!undo) return;
     const t = setTimeout(() => setUndo(null), 1e4);
     return () => clearTimeout(t);
@@ -5430,11 +5863,11 @@ function LifeApp() {
   };
   const clearSample = () => replaceAll({ records: [], sample: false }, db.sample ? "已清空示例数据" : "已清空 " + db.records.length + " 条记录");
   const restoreSample = () => replaceAll({ records: seed(Date.now()), sample: true }, "已换成示例数据");
-  const [sweeping, setSweeping] = (0, import_react8.useState)(false);
-  const [pend, setPend] = (0, import_react8.useState)(null);
-  const [, setTick] = (0, import_react8.useState)(0);
+  const [sweeping, setSweeping] = (0, import_react10.useState)(false);
+  const [pend, setPend] = (0, import_react10.useState)(null);
+  const [, setTick] = (0, import_react10.useState)(0);
   const PEND_S = 5;
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (!pend) return;
     const iv = setInterval(() => setTick((x) => x + 1), 200);
     const t = setTimeout(() => {
@@ -5468,8 +5901,8 @@ function LifeApp() {
     if (!title) return;
     setDb((d) => ({ ...d, records: d.records.map((r) => r.id === t.id ? { ...r, title, amount, cat: amount ? r.cat || null : null } : r.from === t.id && r.type === "expense" ? amount ? { ...r, title, amount } : r : r) }));
   };
-  const [dying, setDying] = (0, import_react8.useState)({});
-  const dieTimers = (0, import_react8.useRef)({});
+  const [dying, setDying] = (0, import_react10.useState)({});
+  const dieTimers = (0, import_react10.useRef)({});
   const deleteTodo = (t) => {
     const end = Date.now() + 650 + 4e3;
     setDying((d) => ({ ...d, [t.id]: { end, phase: "dust" } }));
@@ -5499,8 +5932,8 @@ function LifeApp() {
       return n;
     }), 700);
   };
-  const [printOpen, setPrintOpen] = (0, import_react8.useState)(false);
-  const [arrivals, setArrivals] = (0, import_react8.useState)([]);
+  const [printOpen, setPrintOpen] = (0, import_react10.useState)(false);
+  const [arrivals, setArrivals] = (0, import_react10.useState)([]);
   const unarchiveTodo = (t) => {
     setDb((d) => ({ ...d, records: d.records.filter((r) => !(r.from === t.id && r.type === "expense")).map((r) => r.id === t.id ? { ...r, archived: false, done: false, doneAt: void 0 } : r) }));
     if (t.amount && t.done) addFloats([{ card: "money", text: "+" + money(t.amount), color: "#fff" }]);
@@ -5514,18 +5947,18 @@ function LifeApp() {
     setUndo(null);
     say("已恢复");
   };
-  const [preLines, setPreLines] = (0, import_react8.useState)([]);
-  (0, import_react8.useLayoutEffect)(() => {
+  const [preLines, setPreLines] = (0, import_react10.useState)([]);
+  (0, import_react10.useLayoutEffect)(() => {
     if (!text || !armedCards.size) {
       setPreLines([]);
       return;
     }
     setPreLines([...armedCards].map((c) => ({ id: c, d: pathBetween(inputRef.current, refs.current[c]), color: CARD_COLOR[c] === "#F4F5F1" ? C2.food : CARD_COLOR[c] })).filter((l) => l.d));
   }, [text, armedCards, geo, pathBetween]);
-  const [layout2, setLayout] = (0, import_react8.useState)(loadLayout);
-  const [active, setActive] = (0, import_react8.useState)(null), [resizing, setResizing] = (0, import_react8.useState)(null);
-  const gridRef = (0, import_react8.useRef)(null), flipFrom = (0, import_react8.useRef)(null), dragRef = (0, import_react8.useRef)(null);
-  (0, import_react8.useEffect)(() => {
+  const [layout2, setLayout] = (0, import_react10.useState)(loadLayout);
+  const [active, setActive] = (0, import_react10.useState)(null), [resizing, setResizing] = (0, import_react10.useState)(null);
+  const gridRef = (0, import_react10.useRef)(null), flipFrom = (0, import_react10.useRef)(null), dragRef = (0, import_react10.useRef)(null);
+  (0, import_react10.useEffect)(() => {
     try {
       localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout2));
     } catch (e) {
@@ -5550,7 +5983,7 @@ function LifeApp() {
     });
     flipFrom.current = m;
   };
-  (0, import_react8.useLayoutEffect)(() => {
+  (0, import_react10.useLayoutEffect)(() => {
     const from = flipFrom.current;
     flipFrom.current = null;
     if (!from) return;
@@ -5634,7 +6067,7 @@ function LifeApp() {
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
   };
-  const layout_order_ref = (0, import_react8.useRef)(layout2.order);
+  const layout_order_ref = (0, import_react10.useRef)(layout2.order);
   layout_order_ref.current = layout2.order;
   const startResize = (id, e) => {
     if (e.button !== 0) return;
@@ -5697,17 +6130,17 @@ function LifeApp() {
   };
   const layoutApi = { place, active, resizing, startDrag, startResize, keyMove, keyResize };
   const customized = JSON.stringify(layout2) !== JSON.stringify(DEFAULT_LAYOUT);
-  const [pinned, setPinned] = (0, import_react8.useState)(null);
+  const [pinned, setPinned] = (0, import_react10.useState)(null);
   const shownInsight = focusInsight || pinned;
-  const [link, setLink] = (0, import_react8.useState)(null);
-  (0, import_react8.useEffect)(() => {
+  const [link, setLink] = (0, import_react10.useState)(null);
+  (0, import_react10.useEffect)(() => {
     const k = (e) => {
       if (e.key === "Escape") setPinned(null);
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, []);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (!pinned) return;
     const k = (e) => {
       if (!(e.target.closest && e.target.closest(".lf-tip, .lf-insight"))) setPinned(null);
@@ -5715,7 +6148,7 @@ function LifeApp() {
     document.addEventListener("pointerdown", k, true);
     return () => document.removeEventListener("pointerdown", k, true);
   }, [pinned]);
-  (0, import_react8.useLayoutEffect)(() => {
+  (0, import_react10.useLayoutEffect)(() => {
     const root = rootRef.current, it = shownInsight;
     document.querySelectorAll(".lf-ev-on").forEach((n) => {
       n.classList.remove("lf-ev-on");
@@ -5771,42 +6204,42 @@ function LifeApp() {
   }).filter(Boolean)]) : null;
   const weather = useWeather();
   const heroTone = S2.nowEvent ? { key: eventTone(S2.nowEvent), e: S2.nowEvent } : null;
-  const dskyRef = (0, import_react8.useRef)(null), dfxRef = (0, import_react8.useRef)(null), dayApi = (0, import_react8.useRef)(null);
-  (0, import_react8.useEffect)(() => {
+  const dskyRef = (0, import_react10.useRef)(null), dfxRef = (0, import_react10.useRef)(null), dayApi = (0, import_react10.useRef)(null);
+  (0, import_react10.useEffect)(() => {
     if (!rootRef.current || !dskyRef.current || !dfxRef.current) return;
     const api2 = rgDaySky(rootRef.current, dskyRef.current, dfxRef.current);
     dayApi.current = api2;
     return () => api2.stop();
   }, []);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     dayApi.current && dayApi.current.update({ w: weather.w, dark: isDark });
   }, [weather.w && weather.w.at, weather.w && weather.w.code, now, isDark]);
-  const todoEls = (0, import_react8.useRef)({});
+  const todoEls = (0, import_react10.useRef)({});
   const todoOrder = useDisplayOrder(S2.todos.map((t) => t.id), 520);
   const shownTodos = todoOrder.map((id) => S2.todos.find((t) => t.id === id)).filter(Boolean);
   useFlipList(todoEls, todoOrder);
   const allDone = S2.todos.length > 0 && S2.todos.every((x) => x.done);
   const finale = allDone && allDoneAt && Date.now() - allDoneAt < 6e3;
   const finaleAt = 0.7 + S2.todos.length * 0.09 + 0.25;
-  const rain = (0, import_react8.useMemo)(() => {
+  const rain = (0, import_react10.useMemo)(() => {
     const colors = ["#F2994A", "#7C5CE0", "#1E9E6A", "#3D4FB8", "#0E8A8A", "#E5484D", "#F7C948"];
     return Array.from({ length: 40 }, (_, i) => ({ x: Math.random() * 100, c: colors[i % colors.length], w: 5 + Math.random() * 5, round: Math.random() > 0.6, sx: (Math.random() - 0.5) * 80, r: Math.random() * 720 - 360, dur: 1.6 + Math.random() * 1.2, d: Math.random() * 0.6 }));
   }, [allDoneAt]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (!allDoneAt) return;
     const t = setTimeout(() => setAllDoneAt((x) => x ? x - 1e4 : x), 6100);
     return () => clearTimeout(t);
   }, [allDoneAt]);
   const P2 = (id, idx, extra) => ({ id, idx, refs, floats: floats.filter((f) => f.card === id), flash: flash[id], armed: !!settled && !typing && armedCards.has(id), hl: hlCards && hlCards.has(id), dim: hlCards && !hlCards.has(id), ...extra });
   const h = new Date(S2.now).getHours();
-  const [userName, setUserName] = (0, import_react8.useState)(() => {
+  const [userName, setUserName] = (0, import_react10.useState)(() => {
     try {
       return localStorage.getItem("dsh-rigui:name") || "";
     } catch (e) {
       return "";
     }
   });
-  const [editName, setEditName] = (0, import_react8.useState)(false);
+  const [editName, setEditName] = (0, import_react10.useState)(false);
   const saveName = (v) => {
     const n = String(v || "").trim().slice(0, 16);
     setUserName(n);
@@ -5821,10 +6254,10 @@ function LifeApp() {
     const d = new Date(S2.now);
     return d.getMonth() + 1 + " 月 " + d.getDate() + " 日，周" + "日一二三四五六"[d.getDay()];
   })();
-  return /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-root", "data-theme": isDark ? "dark" : "light", ref: rootRef }, /* @__PURE__ */ import_react8.default.createElement("style", null, CSS + GOALS_CSS + CARDS_CSS + FOG_CSS + RECEIPT_CSS + WEATHER_CSS), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-dsky", ref: dskyRef, "aria-hidden": "true" }), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-nsky", ref: skyRef, "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("canvas", null)), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-dfx", ref: dfxRef, "aria-hidden": "true" }), /* @__PURE__ */ import_react8.default.createElement(LayoutCtx.Provider, { value: layoutApi }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-wrap", style: { position: "relative", zIndex: 1 } }, /* @__PURE__ */ import_react8.default.createElement("div", { style: { marginBottom: GAP } }, /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("hero", 0), cls: "s12", bg: "#3B6FA8", color: "#F4F5F1", style: { padding: "32px 36px" } }, /* @__PURE__ */ import_react8.default.createElement(HeroSky, { w: weather.w, now, tone: heroTone }), /* @__PURE__ */ import_react8.default.createElement(WeatherBadge, { weather, tone: heroTone, now, onFlip: (e) => {
+  return /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-root", "data-theme": isDark ? "dark" : "light", ref: rootRef }, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS + GOALS_CSS + CARDS_CSS + FOG_CSS + RECEIPT_CSS + WEATHER_CSS), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-dsky", ref: dskyRef, "aria-hidden": "true" }), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-nsky", ref: skyRef, "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("canvas", null)), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-dfx", ref: dfxRef, "aria-hidden": "true" }), /* @__PURE__ */ import_react10.default.createElement(LayoutCtx.Provider, { value: layoutApi }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-wrap", style: { position: "relative", zIndex: 1 } }, /* @__PURE__ */ import_react10.default.createElement("div", { style: { marginBottom: GAP } }, /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("hero", 0), cls: "s12", bg: "#3B6FA8", color: "#F4F5F1", style: { padding: "32px 36px" } }, /* @__PURE__ */ import_react10.default.createElement(HeroSky, { w: weather.w, now, tone: heroTone }), /* @__PURE__ */ import_react10.default.createElement(WeatherBadge, { weather, tone: heroTone, now, onFlip: (e) => {
     e.stopPropagation();
     toggleWx(e.currentTarget.closest("[data-card=hero]"));
-  } }), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-theme", ref: themeRef, title: isDark ? "切回日间" : "切到夜间", onClick: (e) => e.stopPropagation(), onPointerDown: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react8.default.createElement(RgSwitch, { on: isDark, onChange: setDark }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-theme-tip", "aria-hidden": "true" }, isDark ? "夜间" : "日间")), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-wxback", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement(WeekWeather, { weather })), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-hero lf-hero-sky lf-glassy" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-hero-left", style: { display: "flex", flexDirection: "column", gap: 44, alignSelf: "stretch", justifyContent: "center", padding: "4px 0" } }, /* @__PURE__ */ import_react8.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, /* @__PURE__ */ import_react8.default.createElement("h1", { style: { margin: 0, fontSize: "clamp(34px, 4.4cqi, 52px)", fontWeight: 600, letterSpacing: "-0.03em", lineHeight: 1.05 } }, hello, editName ? /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, "，", /* @__PURE__ */ import_react8.default.createElement(
+  } }), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-theme", ref: themeRef, title: isDark ? "切回日间" : "切到夜间", onClick: (e) => e.stopPropagation(), onPointerDown: (e) => e.stopPropagation() }, /* @__PURE__ */ import_react10.default.createElement(RgSwitch, { on: isDark, onChange: setDark }), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-theme-tip", "aria-hidden": "true" }, isDark ? "夜间" : "日间")), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-wxback", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement(WeekWeather, { weather })), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-hero lf-hero-sky lf-glassy" }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-hero-left", style: { display: "flex", flexDirection: "column", gap: 44, alignSelf: "stretch", justifyContent: "center", padding: "4px 0" } }, /* @__PURE__ */ import_react10.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, /* @__PURE__ */ import_react10.default.createElement("h1", { style: { margin: 0, fontSize: "clamp(34px, 4.4cqi, 52px)", fontWeight: 600, letterSpacing: "-0.03em", lineHeight: 1.05 } }, hello, editName ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, "，", /* @__PURE__ */ import_react10.default.createElement(
     "input",
     {
       autoFocus: true,
@@ -5838,7 +6271,7 @@ function LifeApp() {
         if (e.key === "Escape") setEditName(false);
       }
     }
-  )) : /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "lf-name", onClick: () => setEditName(true), title: userName ? "改称呼" : "告诉我怎么称呼你" }, userName ? "，" + userName : /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-name-add" }, "，怎么称呼你？")))), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-sayrow" }, /* @__PURE__ */ import_react8.default.createElement("form", { onSubmit: submit, className: "lf-sayform", style: { position: "relative", flex: 1, minWidth: 0 } }, /* @__PURE__ */ import_react8.default.createElement("label", { htmlFor: "lf-say", style: { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" } }, "说一句来记录"), /* @__PURE__ */ import_react8.default.createElement(
+  )) : /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "lf-name", onClick: () => setEditName(true), title: userName ? "改称呼" : "告诉我怎么称呼你" }, userName ? "，" + userName : /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-name-add" }, "，怎么称呼你？")))), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-sayrow" }, /* @__PURE__ */ import_react10.default.createElement("form", { onSubmit: submit, className: "lf-sayform", style: { position: "relative", flex: 1, minWidth: 0 } }, /* @__PURE__ */ import_react10.default.createElement("label", { htmlFor: "lf-say", style: { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" } }, "说一句来记录"), /* @__PURE__ */ import_react10.default.createElement(
     "input",
     {
       id: "lf-say",
@@ -5862,7 +6295,7 @@ function LifeApp() {
         if (e.key === "Escape") setText("");
       }
     }
-  ), /* @__PURE__ */ import_react8.default.createElement("button", { type: "submit", className: "lf-send", disabled: !text.trim() || busy, "aria-label": "记下" }, busy ? /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-spin" }) : Icon.send)), /* @__PURE__ */ import_react8.default.createElement(GoalsButton, { goals, suggestions, onClick: openGoals })), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-below", style: { display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: 10, minHeight: 100, marginTop: -12 } }, text.trim() && !settled ? /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.45)", minHeight: 20 } }, "说完停一下，我来理解这句话") : text.trim() ? /* @__PURE__ */ import_react8.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, opacity: typing ? 0.4 : 1, transition: "opacity .25s" } }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { gap: 10, fontSize: 13, color: "rgba(244,245,241,.55)", minHeight: 20 } }, typing ? /* @__PURE__ */ import_react8.default.createElement("span", null, "输入中，停一下就重新识别") : /* @__PURE__ */ import_react8.default.createElement(AiBadge, { status: aiFor, model: ai.model, error: ai.error }), !typing && aiFor !== "loading" && preview.records.length > 0 && /* @__PURE__ */ import_react8.default.createElement("span", null, "· 会影响 ", armedCards.size, " 张卡")), aiFor === "loading" ? /* @__PURE__ */ import_react8.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-skel", style: { width: "62%" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-skel", style: { width: "40%" } })) : preview.records.length > 0 ? /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("div", { style: { fontSize: 15, lineHeight: 1.7 } }, highlight(settled, preview.tokens)), /* @__PURE__ */ import_react8.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, preview.records.map((r) => r.type === "meal" && r.items ? /* @__PURE__ */ import_react8.default.createElement("div", { key: r.id, className: "lf-row", style: { flexWrap: "wrap", gap: 6 } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-chip", style: { background: "rgba(242,153,74,.18)", color: "#F8C08B" } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-dot", style: { background: C2.food } }), MEAL_NAME[r.meal], " · 共 ", r.kcal, " 千卡"), r.items.map((it, k) => /* @__PURE__ */ import_react8.default.createElement("label", { key: k, className: "lf-chip", style: { background: "rgba(255,255,255,.08)", gap: 6, paddingRight: 6 }, title: "热量不对就改，下次会记住" }, /* @__PURE__ */ import_react8.default.createElement("span", null, it.name, it.qty !== 1 ? " ×" + it.qty : ""), /* @__PURE__ */ import_react8.default.createElement(
+  ), /* @__PURE__ */ import_react10.default.createElement("button", { type: "submit", className: "lf-send", disabled: !text.trim() || busy, "aria-label": "记下" }, busy ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-spin" }) : Icon.send)), /* @__PURE__ */ import_react10.default.createElement(GoalsButton, { goals, suggestions, onClick: openGoals })), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-below", style: { display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: 10, minHeight: 100, marginTop: -12 } }, text.trim() && !settled ? /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.45)", minHeight: 20 } }, "说完停一下，我来理解这句话") : text.trim() ? /* @__PURE__ */ import_react10.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, opacity: typing ? 0.4 : 1, transition: "opacity .25s" } }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { gap: 10, fontSize: 13, color: "rgba(244,245,241,.55)", minHeight: 20 } }, typing ? /* @__PURE__ */ import_react10.default.createElement("span", null, "输入中，停一下就重新识别") : /* @__PURE__ */ import_react10.default.createElement(AiBadge, { status: aiFor, model: ai.model, error: ai.error }), !typing && aiFor !== "loading" && preview.records.length > 0 && /* @__PURE__ */ import_react10.default.createElement("span", null, "· 会影响 ", armedCards.size, " 张卡")), aiFor === "loading" ? /* @__PURE__ */ import_react10.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-skel", style: { width: "62%" } }), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-skel", style: { width: "40%" } })) : preview.records.length > 0 ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("div", { style: { fontSize: 15, lineHeight: 1.7 } }, highlight(settled, preview.tokens)), /* @__PURE__ */ import_react10.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, preview.records.map((r) => r.type === "meal" && r.items ? /* @__PURE__ */ import_react10.default.createElement("div", { key: r.id, className: "lf-row", style: { flexWrap: "wrap", gap: 6 } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-chip", style: { background: "rgba(242,153,74,.18)", color: "#F8C08B" } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-dot", style: { background: C2.food } }), MEAL_NAME[r.meal], " · 共 ", r.kcal, " 千卡"), r.items.map((it, k) => /* @__PURE__ */ import_react10.default.createElement("label", { key: k, className: "lf-chip", style: { background: "rgba(255,255,255,.08)", gap: 6, paddingRight: 6 }, title: "热量不对就改，下次会记住" }, /* @__PURE__ */ import_react10.default.createElement("span", null, it.name, it.qty !== 1 ? " ×" + it.qty : ""), /* @__PURE__ */ import_react10.default.createElement(
     "input",
     {
       type: "number",
@@ -5873,13 +6306,13 @@ function LifeApp() {
       "aria-label": it.name + " 的热量",
       style: { width: 54, height: 22, border: 0, borderRadius: 6, background: it.source === "mine" ? "rgba(30,158,106,.35)" : "rgba(255,255,255,.1)", color: "#F4F5F1", font: "inherit", fontSize: 12.5, textAlign: "right", padding: "0 6px" }
     }
-  ), /* @__PURE__ */ import_react8.default.createElement("span", { style: { opacity: 0.6 } }, "千卡")))) : /* @__PURE__ */ import_react8.default.createElement("div", { key: r.id, className: "lf-row", style: { flexWrap: "wrap", gap: 6 } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-chip", style: { background: "rgba(255,255,255,.1)" } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-dot", style: { background: C2[domainOf(r)] } }), whenOf(r), labelOf(r)), r.title && r.type !== "workout" && r.type !== "sleep" && r.type !== "weight" && /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.6)" } }, r.title)))), preview.note ? /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 12.5, color: "rgba(244,245,241,.5)" } }, preview.note) : null) : /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 14, color: "rgba(244,245,241,.55)" } }, "还没听懂这句，换个说法试试")) : /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-idle-stack" + (sayFocus ? " focus" : "") }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-idle" }, goals.adopted.vision && goals.texts.vision ? /* @__PURE__ */ import_react8.default.createElement("span", { key: goals.texts.vision, className: "lf-vision" }, /* @__PURE__ */ import_react8.default.createElement("i", null), goals.texts.vision) : /* @__PURE__ */ import_react8.default.createElement("p", { className: "lf-story" }, storyOf(S2)), /* @__PURE__ */ import_react8.default.createElement(TodayNudges, { part: "tip", S: S2, ghosts, usual, focused: sayFocus, onPick: () => {
-  }, onInsight: (it) => setPinned((p0) => p0 && p0.id === it.id ? null : it), pinned })), /* @__PURE__ */ import_react8.default.createElement(TodayNudges, { part: "sugs", S: S2, ghosts, usual, focused: sayFocus, onPick: (u) => {
+  ), /* @__PURE__ */ import_react10.default.createElement("span", { style: { opacity: 0.6 } }, "千卡")))) : /* @__PURE__ */ import_react10.default.createElement("div", { key: r.id, className: "lf-row", style: { flexWrap: "wrap", gap: 6 } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-chip", style: { background: "rgba(255,255,255,.1)" } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-dot", style: { background: C2[domainOf(r)] } }), whenOf(r), labelOf(r)), r.title && r.type !== "workout" && r.type !== "sleep" && r.type !== "weight" && /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.6)" } }, r.title)))), preview.note ? /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 12.5, color: "rgba(244,245,241,.5)" } }, preview.note) : null) : /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 14, color: "rgba(244,245,241,.55)" } }, "还没听懂这句，换个说法试试")) : /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-idle-stack" + (sayFocus ? " focus" : "") }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-idle" }, goals.adopted.vision && goals.texts.vision ? /* @__PURE__ */ import_react10.default.createElement("span", { key: goals.texts.vision, className: "lf-vision" }, /* @__PURE__ */ import_react10.default.createElement("i", null), goals.texts.vision) : /* @__PURE__ */ import_react10.default.createElement("p", { className: "lf-story" }, storyOf(S2)), /* @__PURE__ */ import_react10.default.createElement(TodayNudges, { part: "tip", S: S2, ghosts, usual, focused: sayFocus, onPick: () => {
+  }, onInsight: (it) => setPinned((p0) => p0 && p0.id === it.id ? null : it), pinned })), /* @__PURE__ */ import_react10.default.createElement(TodayNudges, { part: "sugs", S: S2, ghosts, usual, focused: sayFocus, onPick: (u) => {
     setText(u);
     inputRef.current && inputRef.current.focus();
-  }, onInsight: (it) => setPinned((p0) => p0 && p0.id === it.id ? null : it), pinned })))), /* @__PURE__ */ import_react8.default.createElement("div", { ref: (el) => {
+  }, onInsight: (it) => setPinned((p0) => p0 && p0.id === it.id ? null : it), pinned })))), /* @__PURE__ */ import_react10.default.createElement("div", { ref: (el) => {
     refs.current.dial = el;
-  }, "data-ev": "dial", style: { display: "grid" } }, /* @__PURE__ */ import_react8.default.createElement(Dial, { S: S2, hover, setHover }))))), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-widgets", ref: gridRef, style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: ROW_H + "px", gridAutoFlow: "dense", gap: GAP } }, /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("energy", 1), cls: "s4", back: /* @__PURE__ */ import_react8.default.createElement(BackEnergy, { S: S2 }) }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between" } }, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h" }, "今天还能吃"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sub" }, "目标 ", num(GOALS.kcal), " 千卡")), /* @__PURE__ */ import_react8.default.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 6, margin: "14px 0 16px" } }, /* @__PURE__ */ import_react8.default.createElement("span", { key: pulse.shake, "data-ev": "energy.num", className: pulse.shake ? "lf-shake" : "", style: { display: "inline-block" } }, /* @__PURE__ */ import_react8.default.createElement(Num, { value: Math.abs(S2.allowance), style: { fontSize: 52, fontWeight: 500, lineHeight: 1, color: S2.allowance < 0 ? C2.link : C2.ink }, className: "lf-num" })), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sub" }, S2.allowance < 0 ? "千卡，已超出" : "千卡")), /* @__PURE__ */ import_react8.default.createElement(EnergyTaste, { S: S2, pour: pulse.pour })), /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("money", 2), cls: "s4", bg: C2.money, color: "#fff", back: /* @__PURE__ */ import_react8.default.createElement(BackMoney, { S: S2 }) }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between" } }, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h" }, S2.remaining < 0 ? "这个月已超支" : "这个月还能花"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-row", style: { gap: 8 } }, /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 13, opacity: 0.8 } }, "还剩 ", S2.daysLeft, " 天"), /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "lf-printbtn" + (printOpen ? " on" : ""), onClick: () => setPrintOpen((v) => !v), "aria-label": printOpen ? "收起小票" : "打印今天的花销小票", title: "打印小票" }, /* @__PURE__ */ import_react8.default.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M7 9V3h10v6" }), /* @__PURE__ */ import_react8.default.createElement("rect", { x: "3", y: "9", width: "18", height: "8", rx: "2" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M7 14h10v7H7z" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M17.5 12h.01" }))))), /* @__PURE__ */ import_react8.default.createElement("div", { style: { margin: "14px 0 16px" } }, /* @__PURE__ */ import_react8.default.createElement("span", { "data-ev": "money.num", style: { display: "inline-block" } }, /* @__PURE__ */ import_react8.default.createElement(Num, { value: Math.abs(S2.remaining), format: money, style: { fontSize: 52, fontWeight: 500, lineHeight: 1 } }))), /* @__PURE__ */ import_react8.default.createElement(MoneyStrip, { S: S2, coin: pulse.coin })), /* @__PURE__ */ import_react8.default.createElement(NextCard, { P: P2, S: S2, onDone: doneEvent }), /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("timeline", 4), cls: "s5 r2", style: { display: "flex", flexDirection: "column" } }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 8 } }, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h" }, "今天记下的"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sub" }, S2.timeline.length ? S2.timeline.length + " 件" : "还空着", ghosts.filter((g) => S2.today + g.h * 36e5 <= S2.now).length ? " · " + ghosts.filter((g) => S2.today + g.h * 36e5 <= S2.now).length + " 件没记" : "")), /* @__PURE__ */ import_react8.default.createElement(TodayList, { S: S2, ghosts, onFill: fillFrom, onRemove: removeGroup })), /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("sleep", 5), cls: "s4", bg: C2.sleep, color: "#fff", back: /* @__PURE__ */ import_react8.default.createElement(BackSleep, { S: S2 }) }, /* @__PURE__ */ import_react8.default.createElement(SleepSky, null), /* @__PURE__ */ import_react8.default.createElement(SleepBody, { S: S2 })), /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("move", 6), cls: "s3", back: /* @__PURE__ */ import_react8.default.createElement(BackMove, { S: S2, workouts: db.records.filter((r) => r.type === "workout" && r.t >= S2.today - 6 * 864e5).sort((a, b) => b.t - a.t) }) }, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h" }, "这周练了"), /* @__PURE__ */ import_react8.default.createElement("div", { "data-ev": "move.count", style: { display: "flex", alignItems: "baseline", gap: 6, margin: "12px 0 10px", alignSelf: "flex-start" } }, /* @__PURE__ */ import_react8.default.createElement(Num, { value: S2.weekWorkouts, style: { fontSize: 44, fontWeight: 500, lineHeight: 1 } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sub" }, "/ ", GOALS.workoutsPerWeek, " 次 · ", /* @__PURE__ */ import_react8.default.createElement(Num, { value: S2.weekMinutes }), " 分钟")), /* @__PURE__ */ import_react8.default.createElement(MoveBars, { S: S2 })), /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("insights", 7), cls: "s4" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 6 } }, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h" }, "它们之间的关系"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sub" }, pinned ? "已钉住 · 点别处或按 Esc 取消" : "悬停看因果，点一下钉住")), S2.insights.length === 0 ? /* @__PURE__ */ import_react8.default.createElement("p", { className: "lf-sub", style: { margin: "12px 0" } }, "多记几天，这里会找出睡眠、吃饭、花钱之间的规律。") : /* @__PURE__ */ import_react8.default.createElement("div", { style: { display: "flex", flexDirection: "column" } }, S2.insights.slice(0, 4).map((it, i) => /* @__PURE__ */ import_react8.default.createElement(
+  }, "data-ev": "dial", style: { display: "grid" } }, /* @__PURE__ */ import_react10.default.createElement(Dial, { S: S2, hover, setHover }))))), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-widgets", ref: gridRef, style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: ROW_H + "px", gridAutoFlow: "dense", gap: GAP } }, /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("energy", 1), cls: "s4", back: /* @__PURE__ */ import_react10.default.createElement(BackEnergy, { S: S2 }) }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between" } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "今天还能吃"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, "目标 ", num(GOALS.kcal), " 千卡")), /* @__PURE__ */ import_react10.default.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 6, margin: "14px 0 16px" } }, /* @__PURE__ */ import_react10.default.createElement("span", { key: pulse.shake, "data-ev": "energy.num", className: pulse.shake ? "lf-shake" : "", style: { display: "inline-block" } }, /* @__PURE__ */ import_react10.default.createElement(Num, { value: Math.abs(S2.allowance), style: { fontSize: 52, fontWeight: 500, lineHeight: 1, color: S2.allowance < 0 ? C2.link : C2.ink }, className: "lf-num" })), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, S2.allowance < 0 ? "千卡，已超出" : "千卡")), /* @__PURE__ */ import_react10.default.createElement(EnergyTaste, { S: S2, pour: pulse.pour })), /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("money", 2), cls: "s4", bg: C2.money, color: "#fff", back: /* @__PURE__ */ import_react10.default.createElement(BackMoney, { S: S2 }) }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between" } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, S2.remaining < 0 ? "这个月已超支" : "这个月还能花"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 8 } }, /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 13, opacity: 0.8 } }, "还剩 ", S2.daysLeft, " 天"), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "lf-printbtn" + (printOpen ? " on" : ""), onClick: () => setPrintOpen((v) => !v), "aria-label": printOpen ? "收起小票" : "打印今天的花销小票", title: "打印小票" }, /* @__PURE__ */ import_react10.default.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M7 9V3h10v6" }), /* @__PURE__ */ import_react10.default.createElement("rect", { x: "3", y: "9", width: "18", height: "8", rx: "2" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M7 14h10v7H7z" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M17.5 12h.01" }))))), /* @__PURE__ */ import_react10.default.createElement("div", { style: { margin: "14px 0 16px" } }, /* @__PURE__ */ import_react10.default.createElement("span", { "data-ev": "money.num", style: { display: "inline-block" } }, /* @__PURE__ */ import_react10.default.createElement(Num, { value: Math.abs(S2.remaining), format: money, style: { fontSize: 52, fontWeight: 500, lineHeight: 1 } }))), /* @__PURE__ */ import_react10.default.createElement(MoneyStrip, { S: S2, coin: pulse.coin })), /* @__PURE__ */ import_react10.default.createElement(NextCard, { P: P2, S: S2, onDone: doneEvent }), /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("routine", 11), cls: "s4", back: /* @__PURE__ */ import_react10.default.createElement(BackRoutine, { rules, onToggle: toggleRule, onEvery: bumpEvery, onGap: bumpGap }) }, /* @__PURE__ */ import_react10.default.createElement(RoutineCard, { ctx: { S: S2, rules, onLog: logRoutine, next: reminderNext } }), coachLines[0] ? /* @__PURE__ */ import_react10.default.createElement("div", { style: { marginTop: 10, fontSize: 12.5, lineHeight: 1.55, color: "var(--ink2)" } }, "AI · ", coachLines[0]) : null), /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("timeline", 4), cls: "s5 r2", style: { display: "flex", flexDirection: "column" } }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 8 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "今天记下的"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, S2.timeline.length ? S2.timeline.length + " 件" : "还空着", ghosts.filter((g) => S2.today + g.h * 36e5 <= S2.now).length ? " · " + ghosts.filter((g) => S2.today + g.h * 36e5 <= S2.now).length + " 件没记" : "")), /* @__PURE__ */ import_react10.default.createElement(TodayList, { S: S2, ghosts, onFill: fillFrom, onRemove: removeGroup })), /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("sleep", 5), cls: "s4", bg: C2.sleep, color: "#fff", back: /* @__PURE__ */ import_react10.default.createElement(BackSleep, { S: S2 }) }, /* @__PURE__ */ import_react10.default.createElement(SleepSky, null), /* @__PURE__ */ import_react10.default.createElement(SleepBody, { S: S2 })), /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("move", 6), cls: "s3", back: /* @__PURE__ */ import_react10.default.createElement(BackMove, { S: S2, workouts: db.records.filter((r) => r.type === "workout" && r.t >= S2.today - 6 * 864e5).sort((a, b) => b.t - a.t) }) }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "这周练了"), /* @__PURE__ */ import_react10.default.createElement("div", { "data-ev": "move.count", style: { display: "flex", alignItems: "baseline", gap: 6, margin: "12px 0 10px", alignSelf: "flex-start" } }, /* @__PURE__ */ import_react10.default.createElement(Num, { value: S2.weekWorkouts, style: { fontSize: 44, fontWeight: 500, lineHeight: 1 } }), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, "/ ", GOALS.workoutsPerWeek, " 次 · ", /* @__PURE__ */ import_react10.default.createElement(Num, { value: S2.weekMinutes }), " 分钟")), /* @__PURE__ */ import_react10.default.createElement(MoveBars, { S: S2 })), /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("insights", 7), cls: "s4" }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 6 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "它们之间的关系"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, pinned ? "已钉住 · 点别处或按 Esc 取消" : "悬停看因果，点一下钉住")), S2.insights.length === 0 ? /* @__PURE__ */ import_react10.default.createElement("p", { className: "lf-sub", style: { margin: "12px 0" } }, "多记几天，这里会找出睡眠、吃饭、花钱之间的规律。") : /* @__PURE__ */ import_react10.default.createElement("div", { style: { display: "flex", flexDirection: "column" } }, S2.insights.slice(0, 4).map((it, i) => /* @__PURE__ */ import_react10.default.createElement(
     "div",
     {
       key: it.id,
@@ -5900,9 +6333,9 @@ function LifeApp() {
       className: "lf-tl-item lf-insight" + (shownInsight && shownInsight.id === it.id ? " on" : "") + (pinned && pinned.id === it.id ? " pinned" : ""),
       style: { display: "flex", gap: 12, padding: "11px 8px", margin: "0 -8px", borderTop: i ? "1px solid var(--rule)" : 0, cursor: "pointer", animationDelay: i * 0.06 + "s" }
     },
-    /* @__PURE__ */ import_react8.default.createElement("span", { "data-ev": "insight." + it.id, style: { display: "flex", alignItems: "center", paddingTop: 4, flex: "none", alignSelf: "flex-start" } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-dot", style: { background: it.from === "time" ? "var(--ink)" : C2[it.from], width: 10, height: 10, borderRadius: 5 } }), /* @__PURE__ */ import_react8.default.createElement("span", { style: { width: 12, height: 2, background: "var(--line)" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-dot", style: { background: it.to === "time" ? "var(--ink)" : C2[it.to], width: 10, height: 10, borderRadius: 5 } })),
-    /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 14, lineHeight: 1.55, color: it.tone === "warn" ? "var(--warn-ink)" : C2.ink } }, it.text)
-  )))), /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("body", 8), cls: "s3", back: /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement(BackBody, { S: S2, monthWeight: goals.adopted.monthWeight ? goals.monthWeight : null }), S2.wNow != null && /* @__PURE__ */ import_react8.default.createElement(WeightFog, null)) }, S2.wNow != null && /* @__PURE__ */ import_react8.default.createElement(WeightFog, null), /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h" }, "体重"), /* @__PURE__ */ import_react8.default.createElement("div", { "data-ev": "body.num", style: { display: "flex", alignItems: "baseline", gap: 6, margin: "12px 0 8px", alignSelf: "flex-start" } }, S2.wNow != null ? /* @__PURE__ */ import_react8.default.createElement(Num, { value: S2.wNow, format: (v) => v.toFixed(1), style: { fontSize: 44, fontWeight: 500, lineHeight: 1 } }) : /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 28, fontWeight: 500 } }, "—"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sub" }, "kg")), /* @__PURE__ */ import_react8.default.createElement("div", { "data-ev": "body.line", style: { flex: 1, minHeight: 56, margin: "4px 0 8px" } }, /* @__PURE__ */ import_react8.default.createElement(WeightScrub, { weights: S2.weights, now: S2.now }, /* @__PURE__ */ import_react8.default.createElement(WeightLine, { weights: S2.weights, now: S2.now }))), /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 13, color: S2.wDelta != null && S2.wDelta <= 0 ? "var(--move-ink)" : "var(--ink2)" } }, goals.adopted.monthWeight && S2.wNow != null ? "Boss 战：30 天到 " + goals.monthWeight + " kg，" + (S2.wNow <= goals.monthWeight ? "已经打赢了" : "还差 " + (S2.wNow - goals.monthWeight).toFixed(1) + " kg") : S2.wDelta == null ? S2.wNow != null ? "记满一周就能看到变化" : "说「体重 68.2」开始记录" : "一周 " + (S2.wDelta <= 0 ? "−" : "+") + Math.abs(S2.wDelta).toFixed(1) + " kg")), /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("week", 9), cls: "s8" }, /* @__PURE__ */ import_react8.default.createElement(WeekBoard, { S: S2 })), /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("todos", 10), cls: "s4", back: /* @__PURE__ */ import_react8.default.createElement(BackTodos, { records: db.records, today: S2.today, onRestore: unarchiveTodo }) }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 6 } }, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h" }, "要做的事"), S2.todos.some((x) => x.done) || pend ? /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-row", style: { gap: 10 } }, !pend && /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sub" }, S2.todos.filter((x) => x.done).length, " / ", S2.todos.length, " 完成"), /* @__PURE__ */ import_react8.default.createElement(
+    /* @__PURE__ */ import_react10.default.createElement("span", { "data-ev": "insight." + it.id, style: { display: "flex", alignItems: "center", paddingTop: 4, flex: "none", alignSelf: "flex-start" } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-dot", style: { background: it.from === "time" ? "var(--ink)" : C2[it.from], width: 10, height: 10, borderRadius: 5 } }), /* @__PURE__ */ import_react10.default.createElement("span", { style: { width: 12, height: 2, background: "var(--line)" } }), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-dot", style: { background: it.to === "time" ? "var(--ink)" : C2[it.to], width: 10, height: 10, borderRadius: 5 } })),
+    /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 14, lineHeight: 1.55, color: it.tone === "warn" ? "var(--warn-ink)" : C2.ink } }, it.text)
+  )))), /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("body", 8), cls: "s3", back: /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement(BackBody, { S: S2, monthWeight: goals.adopted.monthWeight ? goals.monthWeight : null }), S2.wNow != null && /* @__PURE__ */ import_react10.default.createElement(WeightFog, null)) }, S2.wNow != null && /* @__PURE__ */ import_react10.default.createElement(WeightFog, null), /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "体重"), /* @__PURE__ */ import_react10.default.createElement("div", { "data-ev": "body.num", style: { display: "flex", alignItems: "baseline", gap: 6, margin: "12px 0 8px", alignSelf: "flex-start" } }, S2.wNow != null ? /* @__PURE__ */ import_react10.default.createElement(Num, { value: S2.wNow, format: (v) => v.toFixed(1), style: { fontSize: 44, fontWeight: 500, lineHeight: 1 } }) : /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 28, fontWeight: 500 } }, "—"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, "kg")), /* @__PURE__ */ import_react10.default.createElement("div", { "data-ev": "body.line", style: { flex: 1, minHeight: 56, margin: "4px 0 8px" } }, /* @__PURE__ */ import_react10.default.createElement(WeightScrub, { weights: S2.weights, now: S2.now }, /* @__PURE__ */ import_react10.default.createElement(WeightLine, { weights: S2.weights, now: S2.now }))), /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 13, color: S2.wDelta != null && S2.wDelta <= 0 ? "var(--move-ink)" : "var(--ink2)" } }, goals.adopted.monthWeight && S2.wNow != null ? "Boss 战：30 天到 " + goals.monthWeight + " kg，" + (S2.wNow <= goals.monthWeight ? "已经打赢了" : "还差 " + (S2.wNow - goals.monthWeight).toFixed(1) + " kg") : S2.wDelta == null ? S2.wNow != null ? "记满一周就能看到变化" : "说「体重 68.2」开始记录" : "一周 " + (S2.wDelta <= 0 ? "−" : "+") + Math.abs(S2.wDelta).toFixed(1) + " kg")), /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("week", 9), cls: "s8" }, /* @__PURE__ */ import_react10.default.createElement(WeekBoard, { S: S2 })), /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("todos", 10), cls: "s4", back: /* @__PURE__ */ import_react10.default.createElement(BackTodos, { records: db.records, today: S2.today, onRestore: unarchiveTodo }) }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 6 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "要做的事"), S2.todos.some((x) => x.done) || pend ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 10 } }, !pend && /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, S2.todos.filter((x) => x.done).length, " / ", S2.todos.length, " 完成"), /* @__PURE__ */ import_react10.default.createElement(
     "button",
     {
       type: "button",
@@ -5912,8 +6345,8 @@ function LifeApp() {
       "aria-label": pend ? "撤销清理，还剩 " + pendLeft + " 秒" : "清掉已完成的事",
       style: pend ? { "--dur": PEND_S + "s" } : null
     },
-    pend ? /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("span", { key: "p" + pend.end, className: "lf-sweep-glow" }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sweep-num" }, /* @__PURE__ */ import_react8.default.createElement("span", { key: pendLeft, className: "lf-roll" }, pendLeft)), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sweep-label" }, "清理中"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sweep-undo" }, /* @__PURE__ */ import_react8.default.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M9 14L4 9l5-5" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M4 9h10a6 6 0 0 1 0 12h-3" })))) : /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M14 4l6 6" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M17 7l-7.5 7.5" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M9.5 14.5L4 20h6l3.5-3.5" })), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sweep-label" }, "清掉已完成"))
-  )) : /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sub" }, "带金额的，勾掉就记账")), S2.todos.length === 0 ? /* @__PURE__ */ import_react8.default.createElement("p", { className: "lf-sub" }, "说「记得 交水电费 180」就会出现在这里。") : /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-todo-list lf-inner-scroll" }, shownTodos.map((t, i) => /* @__PURE__ */ import_react8.default.createElement(
+    pend ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { key: "p" + pend.end, className: "lf-sweep-glow" }), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sweep-num" }, /* @__PURE__ */ import_react10.default.createElement("span", { key: pendLeft, className: "lf-roll" }, pendLeft)), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sweep-label" }, "清理中"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sweep-undo" }, /* @__PURE__ */ import_react10.default.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M9 14L4 9l5-5" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M4 9h10a6 6 0 0 1 0 12h-3" })))) : /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M14 4l6 6" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M17 7l-7.5 7.5" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M9.5 14.5L4 20h6l3.5-3.5" })), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sweep-label" }, "清掉已完成"))
+  )) : /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, "带金额的，勾掉就记账")), S2.todos.length === 0 ? /* @__PURE__ */ import_react10.default.createElement("p", { className: "lf-sub" }, "说「记得 交水电费 180」就会出现在这里。") : /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-todo-list lf-inner-scroll" }, shownTodos.map((t, i) => /* @__PURE__ */ import_react10.default.createElement(
     TodoRow,
     {
       key: t.id,
@@ -5933,7 +6366,7 @@ function LifeApp() {
       delay: finale ? 0.7 + i * 0.09 + "s" : sweeping && t.done ? S2.todos.filter((x) => x.done).indexOf(t) * 0.07 + "s" : void 0,
       evAmount: !t.done && t.id === (S2.todos.find((x) => !x.done && x.amount) || {}).id
     }
-  ))), allDone && !sweeping && /* @__PURE__ */ import_react8.default.createElement("div", { key: allDoneAt || "static", className: "lf-alldone" + (finale ? " play" : ""), style: { "--delay": finaleAt + "s" } }, /* @__PURE__ */ import_react8.default.createElement("svg", { className: "lf-ad-badge", width: "64", height: "64", viewBox: "0 0 64 64", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("circle", { cx: "32", cy: "32", r: "30", style: { fill: "color-mix(in srgb,#1E9E6A 14%,var(--card))" } }), /* @__PURE__ */ import_react8.default.createElement("circle", { cx: "32", cy: "32", r: "22", fill: "#1E9E6A" }), /* @__PURE__ */ import_react8.default.createElement("path", { className: "lf-ad-check", d: "M22 32.5l7 7L42.5 25", fill: "none", stroke: "#fff", strokeWidth: "4.5", strokeLinecap: "round", strokeLinejoin: "round", pathLength: "1" })), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-ad-text" }, /* @__PURE__ */ import_react8.default.createElement("div", { style: { fontSize: 17, fontWeight: 600 } }, "全部完成"), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-sub" }, "今天 ", S2.todos.length, " 件事都做完了"))), finale && /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-rain", "aria-hidden": "true" }, rain.map((q, k) => /* @__PURE__ */ import_react8.default.createElement("i", { key: k, style: { left: q.x + "%", background: q.c, width: q.w, height: q.round ? q.w : q.w * 0.42, borderRadius: q.round ? "50%" : 2, "--sx": q.sx + "px", "--r": q.r + "deg", "--dur": q.dur + "s", "--d": finaleAt + q.d + "s" } }))))), /* @__PURE__ */ import_react8.default.createElement("footer", { className: "lf-row", style: { justifyContent: "space-between", marginTop: 18, padding: "0 6px", fontSize: 13, color: "var(--ink2)", flexWrap: "wrap" } }, /* @__PURE__ */ import_react8.default.createElement("span", null, "数据存在这台电脑上 · ⌘K 随时记一句 · 按住卡片顶部的小横条换位置，拖右下角放大缩小"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-row", style: { gap: 6 } }, customized && /* @__PURE__ */ import_react8.default.createElement("button", { className: "lf-btn", onClick: resetLayout }, "恢复默认布局"), confirm === "clear" ? /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-row lf-confirm", role: "alert", style: { gap: 8 } }, /* @__PURE__ */ import_react8.default.createElement("span", { style: { color: "var(--warn-ink)" } }, db.sample ? "清空示例数据" : "删除全部 " + db.records.length + " 条记录", realCount > 0 && db.sample ? "（含你自己记的 " + realCount + " 条）" : "", "，确定吗？"), /* @__PURE__ */ import_react8.default.createElement("button", { className: "lf-btn", onClick: () => setConfirm(null) }, "取消"), /* @__PURE__ */ import_react8.default.createElement("button", { className: "lf-btn", autoFocus: true, onClick: clearSample, style: { background: "#E5484D", color: "#fff" } }, "确定清空")) : confirm === "sample" ? /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-row lf-confirm", role: "alert", style: { gap: 8 } }, /* @__PURE__ */ import_react8.default.createElement("span", { style: { color: "var(--warn-ink)" } }, "示例数据会替换掉你现在的 ", db.records.length, " 条记录，确定吗？"), /* @__PURE__ */ import_react8.default.createElement("button", { className: "lf-btn", onClick: () => setConfirm(null) }, "取消"), /* @__PURE__ */ import_react8.default.createElement("button", { className: "lf-btn", autoFocus: true, onClick: restoreSample, style: { background: "#E5484D", color: "#fff" } }, "确定替换")) : db.sample ? /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("span", null, "现在是示例数据"), /* @__PURE__ */ import_react8.default.createElement("button", { className: "lf-btn", onClick: () => setConfirm("clear") }, "清空，开始用")) : /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, db.records.length > 0 && /* @__PURE__ */ import_react8.default.createElement("button", { className: "lf-btn", onClick: () => setConfirm("clear") }, "清空全部记录"), /* @__PURE__ */ import_react8.default.createElement("button", { className: "lf-btn", onClick: () => db.records.length ? setConfirm("sample") : restoreSample() }, "看示例数据")))))), /* @__PURE__ */ import_react8.default.createElement("svg", { "aria-hidden": "true", style: { position: "absolute", left: 0, top: 0, width: geo.w || "100%", height: geo.h || "100%", pointerEvents: "none", zIndex: 5, overflow: "visible" } }, threads && threads.lines.map((l, i) => /* @__PURE__ */ import_react8.default.createElement("g", { key: threads.stamp + l.id }, /* @__PURE__ */ import_react8.default.createElement("path", { d: l.d, className: "lf-thread", stroke: l.color, pathLength: "1", style: { animationDelay: i * 0.05 + "s, " + (1.2 + i * 0.05) + "s" } }), /* @__PURE__ */ import_react8.default.createElement("circle", { r: "5", fill: l.color, opacity: "0" }, /* @__PURE__ */ import_react8.default.createElement("animate", { attributeName: "opacity", values: "0;1;1;0", keyTimes: "0;0.1;0.8;1", dur: "0.9s", begin: i * 0.05 + "s", fill: "freeze" }), /* @__PURE__ */ import_react8.default.createElement("animateMotion", { path: l.d, dur: "0.75s", begin: i * 0.05 + "s", fill: "freeze", keyPoints: "0;1", keyTimes: "0;1", calcMode: "spline", keySplines: "0.4 0 0.2 1" })))), link && /* @__PURE__ */ import_react8.default.createElement("g", { key: link.id }, /* @__PURE__ */ import_react8.default.createElement("defs", null, link.segs.map((g, i) => /* @__PURE__ */ import_react8.default.createElement("linearGradient", { key: i, id: "lfg-" + i, gradientUnits: "userSpaceOnUse", x1: g.a[0], y1: g.a[1], x2: g.z[0], y2: g.z[1] }, /* @__PURE__ */ import_react8.default.createElement("stop", { offset: "0", stopColor: g.c1 }), /* @__PURE__ */ import_react8.default.createElement("stop", { offset: "1", stopColor: g.c2 }))), /* @__PURE__ */ import_react8.default.createElement("marker", { id: "lf-arrow", viewBox: "0 0 10 10", refX: "8", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M0 0L10 5L0 10z", fill: link.color })), /* @__PURE__ */ import_react8.default.createElement("filter", { id: "lf-glow", x: "-50%", y: "-50%", width: "200%", height: "200%" }, /* @__PURE__ */ import_react8.default.createElement("feGaussianBlur", { stdDeviation: "3" }))), link.segs.map((g, i) => /* @__PURE__ */ import_react8.default.createElement(
+  ))), allDone && !sweeping && /* @__PURE__ */ import_react10.default.createElement("div", { key: allDoneAt || "static", className: "lf-alldone" + (finale ? " play" : ""), style: { "--delay": finaleAt + "s" } }, /* @__PURE__ */ import_react10.default.createElement("svg", { className: "lf-ad-badge", width: "64", height: "64", viewBox: "0 0 64 64", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("circle", { cx: "32", cy: "32", r: "30", style: { fill: "color-mix(in srgb,#1E9E6A 14%,var(--card))" } }), /* @__PURE__ */ import_react10.default.createElement("circle", { cx: "32", cy: "32", r: "22", fill: "#1E9E6A" }), /* @__PURE__ */ import_react10.default.createElement("path", { className: "lf-ad-check", d: "M22 32.5l7 7L42.5 25", fill: "none", stroke: "#fff", strokeWidth: "4.5", strokeLinecap: "round", strokeLinejoin: "round", pathLength: "1" })), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-ad-text" }, /* @__PURE__ */ import_react10.default.createElement("div", { style: { fontSize: 17, fontWeight: 600 } }, "全部完成"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-sub" }, "今天 ", S2.todos.length, " 件事都做完了"))), finale && /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-rain", "aria-hidden": "true" }, rain.map((q, k) => /* @__PURE__ */ import_react10.default.createElement("i", { key: k, style: { left: q.x + "%", background: q.c, width: q.w, height: q.round ? q.w : q.w * 0.42, borderRadius: q.round ? "50%" : 2, "--sx": q.sx + "px", "--r": q.r + "deg", "--dur": q.dur + "s", "--d": finaleAt + q.d + "s" } }))))), /* @__PURE__ */ import_react10.default.createElement("footer", { className: "lf-row", style: { justifyContent: "space-between", marginTop: 18, padding: "0 6px", fontSize: 13, color: "var(--ink2)", flexWrap: "wrap" } }, /* @__PURE__ */ import_react10.default.createElement("span", null, "数据存在这台电脑上 · ⌘K 随时记一句 · 按住卡片顶部的小横条换位置，拖右下角放大缩小"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 6 } }, customized && /* @__PURE__ */ import_react10.default.createElement("button", { className: "lf-btn", onClick: resetLayout }, "恢复默认布局"), confirm === "clear" ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row lf-confirm", role: "alert", style: { gap: 8 } }, /* @__PURE__ */ import_react10.default.createElement("span", { style: { color: "var(--warn-ink)" } }, db.sample ? "清空示例数据" : "删除全部 " + db.records.length + " 条记录", realCount > 0 && db.sample ? "（含你自己记的 " + realCount + " 条）" : "", "，确定吗？"), /* @__PURE__ */ import_react10.default.createElement("button", { className: "lf-btn", onClick: () => setConfirm(null) }, "取消"), /* @__PURE__ */ import_react10.default.createElement("button", { className: "lf-btn", autoFocus: true, onClick: clearSample, style: { background: "#E5484D", color: "#fff" } }, "确定清空")) : confirm === "sample" ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row lf-confirm", role: "alert", style: { gap: 8 } }, /* @__PURE__ */ import_react10.default.createElement("span", { style: { color: "var(--warn-ink)" } }, "示例数据会替换掉你现在的 ", db.records.length, " 条记录，确定吗？"), /* @__PURE__ */ import_react10.default.createElement("button", { className: "lf-btn", onClick: () => setConfirm(null) }, "取消"), /* @__PURE__ */ import_react10.default.createElement("button", { className: "lf-btn", autoFocus: true, onClick: restoreSample, style: { background: "#E5484D", color: "#fff" } }, "确定替换")) : db.sample ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", null, "现在是示例数据"), /* @__PURE__ */ import_react10.default.createElement("button", { className: "lf-btn", onClick: () => setConfirm("clear") }, "清空，开始用")) : /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, db.records.length > 0 && /* @__PURE__ */ import_react10.default.createElement("button", { className: "lf-btn", onClick: () => setConfirm("clear") }, "清空全部记录"), /* @__PURE__ */ import_react10.default.createElement("button", { className: "lf-btn", onClick: () => db.records.length ? setConfirm("sample") : restoreSample() }, "看示例数据")))))), /* @__PURE__ */ import_react10.default.createElement("svg", { "aria-hidden": "true", style: { position: "absolute", left: 0, top: 0, width: geo.w || "100%", height: geo.h || "100%", pointerEvents: "none", zIndex: 5, overflow: "visible" } }, threads && threads.lines.map((l, i) => /* @__PURE__ */ import_react10.default.createElement("g", { key: threads.stamp + l.id }, /* @__PURE__ */ import_react10.default.createElement("path", { d: l.d, className: "lf-thread", stroke: l.color, pathLength: "1", style: { animationDelay: i * 0.05 + "s, " + (1.2 + i * 0.05) + "s" } }), /* @__PURE__ */ import_react10.default.createElement("circle", { r: "5", fill: l.color, opacity: "0" }, /* @__PURE__ */ import_react10.default.createElement("animate", { attributeName: "opacity", values: "0;1;1;0", keyTimes: "0;0.1;0.8;1", dur: "0.9s", begin: i * 0.05 + "s", fill: "freeze" }), /* @__PURE__ */ import_react10.default.createElement("animateMotion", { path: l.d, dur: "0.75s", begin: i * 0.05 + "s", fill: "freeze", keyPoints: "0;1", keyTimes: "0;1", calcMode: "spline", keySplines: "0.4 0 0.2 1" })))), link && /* @__PURE__ */ import_react10.default.createElement("g", { key: link.id }, /* @__PURE__ */ import_react10.default.createElement("defs", null, link.segs.map((g, i) => /* @__PURE__ */ import_react10.default.createElement("linearGradient", { key: i, id: "lfg-" + i, gradientUnits: "userSpaceOnUse", x1: g.a[0], y1: g.a[1], x2: g.z[0], y2: g.z[1] }, /* @__PURE__ */ import_react10.default.createElement("stop", { offset: "0", stopColor: g.c1 }), /* @__PURE__ */ import_react10.default.createElement("stop", { offset: "1", stopColor: g.c2 }))), /* @__PURE__ */ import_react10.default.createElement("marker", { id: "lf-arrow", viewBox: "0 0 10 10", refX: "8", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M0 0L10 5L0 10z", fill: link.color })), /* @__PURE__ */ import_react10.default.createElement("filter", { id: "lf-glow", x: "-50%", y: "-50%", width: "200%", height: "200%" }, /* @__PURE__ */ import_react10.default.createElement("feGaussianBlur", { stdDeviation: "3" }))), link.segs.map((g, i) => /* @__PURE__ */ import_react10.default.createElement(
     "path",
     {
       key: i,
@@ -5944,7 +6377,19 @@ function LifeApp() {
       markerEnd: g.end ? "url(#lf-arrow)" : void 0,
       style: { animationDelay: i * 0.35 + "s" }
     }
-  )), link.segs.map((g, i) => /* @__PURE__ */ import_react8.default.createElement("circle", { key: "r" + i, cx: g.z[0], cy: g.z[1], r: "6", fill: "none", stroke: g.c2, strokeWidth: "2", className: "lf-arrive", style: { animationDelay: 0.35 + i * 0.35 + "s" } })), /* @__PURE__ */ import_react8.default.createElement("circle", { r: "9", fill: link.color, opacity: ".35", filter: "url(#lf-glow)" }, /* @__PURE__ */ import_react8.default.createElement("animateMotion", { dur: "1.8s", begin: "0.7s", repeatCount: "indefinite", path: link.full, keyPoints: "0;1", keyTimes: "0;1", calcMode: "spline", keySplines: "0.45 0 0.25 1" })), /* @__PURE__ */ import_react8.default.createElement("circle", { r: "4", fill: "#fff", stroke: link.color, strokeWidth: "2" }, /* @__PURE__ */ import_react8.default.createElement("animateMotion", { dur: "1.8s", begin: "0.7s", repeatCount: "indefinite", path: link.full, keyPoints: "0;1", keyTimes: "0;1", calcMode: "spline", keySplines: "0.45 0 0.25 1" })))), /* @__PURE__ */ import_react8.default.createElement(ReceiptPrinter, { open: printOpen, onClose: () => setPrintOpen(false), records: db.records, S: S2, cardEl: refs.current.money, rootEl: rootRef.current }), /* @__PURE__ */ import_react8.default.createElement(GoalsPanel, { open: goalsOpen, onClose: () => setGoalsOpen(false), rootRect, suggestions, goals, onAdopt: adoptGoal, onUndo: undoGoal, celebrate }), bursts.map((b) => /* @__PURE__ */ import_react8.default.createElement("div", { key: b.id, "aria-hidden": "true", style: { position: "fixed", left: b.x, top: b.y, width: 0, height: 0, zIndex: 40, pointerEvents: "none" } }, b.big && /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-ring" }), b.parts.map((q, i) => /* @__PURE__ */ import_react8.default.createElement("i", { key: i, className: "lf-confetti", style: { "--dx": q.dx + "px", "--dy": q.dy + "px", "--r": q.r + "deg", background: q.c, width: q.w, height: q.round ? q.w : q.w * 0.45, borderRadius: q.round ? "50%" : 2, animationDelay: q.delay + "s", animationDuration: (b.big ? 1.3 : 0.9) + "s" } })))), undo && /* @__PURE__ */ import_react8.default.createElement("div", { role: "status", className: "lf-row", style: { position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 21, gap: 14, background: "#1F2328", color: "#F4F5F1", borderRadius: 24, padding: "8px 8px 8px 20px", fontSize: 14, boxShadow: "0 12px 32px rgba(31,35,40,.25)", animation: "lf-rise .35s cubic-bezier(.2,.8,.2,1)" } }, /* @__PURE__ */ import_react8.default.createElement("span", null, undo.label), /* @__PURE__ */ import_react8.default.createElement("button", { onClick: doUndo, style: { height: 34, padding: "0 16px", borderRadius: 17, border: 0, background: "#F2994A", color: "#1F2328", fontWeight: 600, fontSize: 14 } }, "撤销")), toast && !undo && /* @__PURE__ */ import_react8.default.createElement("div", { role: "status", style: { position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 20, background: "#1F2328", color: "#F4F5F1", borderRadius: 22, padding: "12px 20px", fontSize: 14, boxShadow: "0 12px 32px rgba(31,35,40,.25)", animation: "lf-rise .35s cubic-bezier(.2,.8,.2,1)" } }, toast));
+  )), link.segs.map((g, i) => /* @__PURE__ */ import_react10.default.createElement("circle", { key: "r" + i, cx: g.z[0], cy: g.z[1], r: "6", fill: "none", stroke: g.c2, strokeWidth: "2", className: "lf-arrive", style: { animationDelay: 0.35 + i * 0.35 + "s" } })), /* @__PURE__ */ import_react10.default.createElement("circle", { r: "9", fill: link.color, opacity: ".35", filter: "url(#lf-glow)" }, /* @__PURE__ */ import_react10.default.createElement("animateMotion", { dur: "1.8s", begin: "0.7s", repeatCount: "indefinite", path: link.full, keyPoints: "0;1", keyTimes: "0;1", calcMode: "spline", keySplines: "0.45 0 0.25 1" })), /* @__PURE__ */ import_react10.default.createElement("circle", { r: "4", fill: "#fff", stroke: link.color, strokeWidth: "2" }, /* @__PURE__ */ import_react10.default.createElement("animateMotion", { dur: "1.8s", begin: "0.7s", repeatCount: "indefinite", path: link.full, keyPoints: "0;1", keyTimes: "0;1", calcMode: "spline", keySplines: "0.45 0 0.25 1" })))), /* @__PURE__ */ import_react10.default.createElement(ReceiptPrinter, { open: printOpen, onClose: () => setPrintOpen(false), records: db.records, S: S2, cardEl: refs.current.money, rootEl: rootRef.current }), /* @__PURE__ */ import_react10.default.createElement(GoalsPanel, { open: goalsOpen, onClose: () => setGoalsOpen(false), rootRect, suggestions, goals, onAdopt: adoptGoal, onUndo: undoGoal, celebrate }), /* @__PURE__ */ import_react10.default.createElement(
+    PlanPanel,
+    {
+      open: plan.open,
+      draft: plan.draft,
+      date: plan.date,
+      busy: plan.busy,
+      error: plan.error,
+      onClose: () => setPlan({ open: false, busy: false, draft: null, error: "", date: "", text: "" }),
+      onAccept: acceptPlan,
+      onReplan: (c) => openPlan(plan.text, c)
+    }
+  ), /* @__PURE__ */ import_react10.default.createElement(ReminderStack, { items: reminders, onDone: reminderDone, onSnooze: reminderSnooze, onSkip: reminderSkip }), bursts.map((b) => /* @__PURE__ */ import_react10.default.createElement("div", { key: b.id, "aria-hidden": "true", style: { position: "fixed", left: b.x, top: b.y, width: 0, height: 0, zIndex: 40, pointerEvents: "none" } }, b.big && /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-ring" }), b.parts.map((q, i) => /* @__PURE__ */ import_react10.default.createElement("i", { key: i, className: "lf-confetti", style: { "--dx": q.dx + "px", "--dy": q.dy + "px", "--r": q.r + "deg", background: q.c, width: q.w, height: q.round ? q.w : q.w * 0.45, borderRadius: q.round ? "50%" : 2, animationDelay: q.delay + "s", animationDuration: (b.big ? 1.3 : 0.9) + "s" } })))), undo && /* @__PURE__ */ import_react10.default.createElement("div", { role: "status", className: "lf-row", style: { position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 21, gap: 14, background: "#1F2328", color: "#F4F5F1", borderRadius: 24, padding: "8px 8px 8px 20px", fontSize: 14, boxShadow: "0 12px 32px rgba(31,35,40,.25)", animation: "lf-rise .35s cubic-bezier(.2,.8,.2,1)" } }, /* @__PURE__ */ import_react10.default.createElement("span", null, undo.label), /* @__PURE__ */ import_react10.default.createElement("button", { onClick: doUndo, style: { height: 34, padding: "0 16px", borderRadius: 17, border: 0, background: "#F2994A", color: "#1F2328", fontWeight: 600, fontSize: 14 } }, "撤销")), toast && !undo && !reminders.length && /* @__PURE__ */ import_react10.default.createElement("div", { role: "status", style: { position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 20, background: "#1F2328", color: "#F4F5F1", borderRadius: 22, padding: "12px 20px", fontSize: 14, boxShadow: "0 12px 32px rgba(31,35,40,.25)", animation: "lf-rise .35s cubic-bezier(.2,.8,.2,1)" } }, toast));
 }
 function TodayList({ S: S2, ghosts, onFill, onRemove }) {
   const entries = [
@@ -5957,12 +6402,12 @@ function TodayList({ S: S2, ghosts, onFill, onRemove }) {
     const m = Math.round(h * 60);
     return String(Math.floor(m / 60) % 24).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
   };
-  return /* @__PURE__ */ import_react8.default.createElement("div", { style: { display: "flex", flexDirection: "column" } }, S2.timeline.length === 0 && /* @__PURE__ */ import_react8.default.createElement("p", { className: "lf-enter", style: { margin: "2px 0 10px", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink2)" } }, "今天还没记。按你平时的习惯，先把今天的空位摆出来了，点一个就能补上。"), entries.map((e, i) => {
+  return /* @__PURE__ */ import_react10.default.createElement("div", { style: { display: "flex", flexDirection: "column" } }, S2.timeline.length === 0 && /* @__PURE__ */ import_react10.default.createElement("p", { className: "lf-enter", style: { margin: "2px 0 10px", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink2)" } }, "今天还没记。按你平时的习惯，先把今天的空位摆出来了，点一个就能补上。"), entries.map((e, i) => {
     const prev = entries[i - 1];
-    if (e.kind === "now") return /* @__PURE__ */ import_react8.default.createElement("div", { key: "now", className: "lf-now", "aria-label": "现在 " + fmtTime(S2.now) }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-now-dot" }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-num" }, "现在 ", fmtTime(S2.now)), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-now-line" }));
+    if (e.kind === "now") return /* @__PURE__ */ import_react10.default.createElement("div", { key: "now", className: "lf-now", "aria-label": "现在 " + fmtTime(S2.now) }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-now-dot" }), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-num" }, "现在 ", fmtTime(S2.now)), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-now-line" }));
     if (e.kind === "ghost") {
       const s = e.s, future = e.t > S2.now;
-      return /* @__PURE__ */ import_react8.default.createElement(
+      return /* @__PURE__ */ import_react10.default.createElement(
         "button",
         {
           key: e.key,
@@ -5973,21 +6418,21 @@ function TodayList({ S: S2, ghosts, onFill, onRemove }) {
           onClick: () => onFill(s.phrase),
           "aria-label": (future ? "待会儿：" : "还没记：") + s.title + "，" + s.hint + "，点一下填进输入框"
         },
-        /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-num lf-ghost-time" }, hm2(s.h)),
-        /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-ghost-box" }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-ghost-title" }, s.title), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-ghost-hint" }, s.hint), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-ghost-cta" }, future ? "待会儿" : "还没记", /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-ghost-plus", "aria-hidden": "true" }, "+")))
+        /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-num lf-ghost-time" }, hm2(s.h)),
+        /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-ghost-box" }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-ghost-title" }, s.title), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-ghost-hint" }, s.hint), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-ghost-cta" }, future ? "待会儿" : "还没记", /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-ghost-plus", "aria-hidden": "true" }, "+")))
       );
     }
     const g = e.g;
-    return /* @__PURE__ */ import_react8.default.createElement("div", { key: e.key, className: "lf-tl-item", style: { display: "flex", gap: 14, padding: "12px 0", borderTop: prev && prev.kind === "real" ? "1px solid var(--rule)" : 0, alignItems: "flex-start" } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-num", style: { width: 44, fontSize: 13, color: "var(--ink2)", paddingTop: 3, flex: "none" } }, fmtTime(g.t)), /* @__PURE__ */ import_react8.default.createElement("div", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 } }, /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 15, fontWeight: 500 } }, g.wake ? "醒来" : g.items[0].type === "weight" ? /* @__PURE__ */ import_react8.default.createElement(Private, null, g.items[0].title || labelOf(g.items[0])) : g.items[0].title || labelOf(g.items[0])), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { gap: 6, flexWrap: "wrap" } }, g.items.map((r, j) => /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, { key: r.id }, j > 0 && /* @__PURE__ */ import_react8.default.createElement("span", { style: { color: "#B4B8B0", display: "inline-flex" } }, Icon.arrow), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-chip", style: { background: DOMAIN[domainOf(r)].soft, color: "var(--ink)", height: 24 } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-dot", style: { background: C2[domainOf(r)] } }), r.type === "weight" ? /* @__PURE__ */ import_react8.default.createElement(Private, null, labelOf(r)) : labelOf(r)))))), !g.wake && /* @__PURE__ */ import_react8.default.createElement("button", { className: "lf-icon", "aria-label": "删除 " + (g.items[0].title || ""), onClick: () => onRemove(g) }, Icon.x));
+    return /* @__PURE__ */ import_react10.default.createElement("div", { key: e.key, className: "lf-tl-item", style: { display: "flex", gap: 14, padding: "12px 0", borderTop: prev && prev.kind === "real" ? "1px solid var(--rule)" : 0, alignItems: "flex-start" } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-num", style: { width: 44, fontSize: 13, color: "var(--ink2)", paddingTop: 3, flex: "none" } }, fmtTime(g.t)), /* @__PURE__ */ import_react10.default.createElement("div", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 } }, /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 15, fontWeight: 500 } }, g.wake ? "醒来" : g.items[0].type === "weight" ? /* @__PURE__ */ import_react10.default.createElement(Private, null, g.items[0].title || labelOf(g.items[0])) : g.items[0].title || labelOf(g.items[0])), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { gap: 6, flexWrap: "wrap" } }, g.items.map((r, j) => /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, { key: r.id }, j > 0 && /* @__PURE__ */ import_react10.default.createElement("span", { style: { color: "#B4B8B0", display: "inline-flex" } }, Icon.arrow), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-chip", style: { background: DOMAIN[domainOf(r)].soft, color: "var(--ink)", height: 24 } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-dot", style: { background: C2[domainOf(r)] } }), r.type === "weight" ? /* @__PURE__ */ import_react10.default.createElement(Private, null, labelOf(r)) : labelOf(r)))))), !g.wake && /* @__PURE__ */ import_react10.default.createElement("button", { className: "lf-icon", "aria-label": "删除 " + (g.items[0].title || ""), onClick: () => onRemove(g) }, Icon.x));
   }));
 }
 function NextCard({ P: P2, S: S2, onDone }) {
   const n = S2.next;
-  if (!n) return /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("next", 3), cls: "s4", bg: "var(--sheet)" }, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h" }, "接下来"), /* @__PURE__ */ import_react8.default.createElement("p", { style: { fontSize: 22, fontWeight: 600, margin: "18px 0 6px" } }, "后面没有安排了"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sub" }, "说「明天 19:30 跑步」加一项。"));
+  if (!n) return /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("next", 3), cls: "s4", bg: "var(--sheet)" }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "接下来"), /* @__PURE__ */ import_react10.default.createElement("p", { style: { fontSize: 22, fontWeight: 600, margin: "18px 0 6px" } }, "后面没有安排了"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, "说「明天 19:30 跑步」加一项。"));
   const isMove = n.domain === "move", toneBg = TONES[eventTone(n)];
   const mins = Math.round((n.t - S2.now) / 6e4);
   const when = mins <= 0 ? "进行中" : mins < 60 ? mins + " 分钟后" : mins < 24 * 60 ? Math.floor(mins / 60) + " 小时 " + mins % 60 + " 分后" : "明天 " + fmtTime(n.t);
-  return /* @__PURE__ */ import_react8.default.createElement(Card, { ...P2("next", 3), cls: "s4", bg: toneBg, color: "#fff", style: { display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 14 } }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between" } }, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h", style: { fontWeight: 500, opacity: 0.85, fontSize: 14 } }, "接下来"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-chip", style: { background: "rgba(255,255,255,.18)" } }, when)), /* @__PURE__ */ import_react8.default.createElement("div", null, /* @__PURE__ */ import_react8.default.createElement("div", { "data-ev": "next.title", style: { fontSize: 30, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1, display: "inline-block" } }, n.title), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-num", style: { fontSize: 14, opacity: 0.8, marginTop: 6 } }, fmtTime(n.t), " – ", fmtTime(n.end || n.t + 36e5))), S2.nextAdvice && /* @__PURE__ */ import_react8.default.createElement("div", { style: { fontSize: 13.5, lineHeight: 1.5, background: "rgba(255,255,255,.14)", borderRadius: 14, padding: "9px 12px" } }, S2.nextAdvice), isMove && /* @__PURE__ */ import_react8.default.createElement("button", { onClick: () => onDone(n), style: { alignSelf: "flex-start", height: 40, padding: "0 18px", borderRadius: 20, border: 0, background: "var(--card)", color: C2.move, fontWeight: 600, fontSize: 14 } }, "练完了，记下"));
+  return /* @__PURE__ */ import_react10.default.createElement(Card, { ...P2("next", 3), cls: "s4", bg: toneBg, color: "#fff", style: { display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 14 } }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between" } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h", style: { fontWeight: 500, opacity: 0.85, fontSize: 14 } }, "接下来"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-chip", style: { background: "rgba(255,255,255,.18)" } }, when)), /* @__PURE__ */ import_react10.default.createElement("div", null, /* @__PURE__ */ import_react10.default.createElement("div", { "data-ev": "next.title", style: { fontSize: 30, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1, display: "inline-block" } }, n.title), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-num", style: { fontSize: 14, opacity: 0.8, marginTop: 6 } }, fmtTime(n.t), " – ", fmtTime(n.end || n.t + 36e5))), S2.nextAdvice && /* @__PURE__ */ import_react10.default.createElement("div", { style: { fontSize: 13.5, lineHeight: 1.5, background: "rgba(255,255,255,.14)", borderRadius: 14, padding: "9px 12px" } }, S2.nextAdvice), isMove && /* @__PURE__ */ import_react10.default.createElement("button", { onClick: () => onDone(n), style: { alignSelf: "flex-start", height: 40, padding: "0 18px", borderRadius: 20, border: 0, background: "var(--card)", color: C2.move, fontWeight: 600, fontSize: 14 } }, "练完了，记下"));
 }
 function dustOf(id, n) {
   let h = 0;
@@ -5996,9 +6441,9 @@ function dustOf(id, n) {
   return Array.from({ length: n }, () => ({ x: 30 + r() * 70, y: -26 + r() * 40, rot: -60 + r() * 120, s: 0.3 + r() * 0.5 }));
 }
 function useDisplayOrder(ids, delay) {
-  const [disp, setDisp] = (0, import_react8.useState)(ids);
+  const [disp, setDisp] = (0, import_react10.useState)(ids);
   const key = ids.join(","), dk = disp.join(",");
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (key === dk) return;
     const same = ids.length === disp.length && ids.every((x) => disp.includes(x));
     if (!same) {
@@ -6011,8 +6456,8 @@ function useDisplayOrder(ids, delay) {
   return disp;
 }
 function useFlipList(els, order) {
-  const prev = (0, import_react8.useRef)({});
-  (0, import_react8.useLayoutEffect)(() => {
+  const prev = (0, import_react10.useRef)({});
+  (0, import_react10.useLayoutEffect)(() => {
     const now = {};
     order.forEach((id) => {
       const n = els.current[id];
@@ -6052,11 +6497,11 @@ function useFlipList(els, order) {
   });
 }
 function TodoRow({ arrived = -1, onLanded, rowRef, t, i, onToggle, onEdit, onDelete, onRestore, dying, cls, delay, evAmount }) {
-  const [edit, setEdit] = (0, import_react8.useState)(false);
-  const [draft, setDraft] = (0, import_react8.useState)("");
-  const [saved, setSaved] = (0, import_react8.useState)(0);
-  const inp = (0, import_react8.useRef)(null);
-  (0, import_react8.useEffect)(() => {
+  const [edit, setEdit] = (0, import_react10.useState)(false);
+  const [draft, setDraft] = (0, import_react10.useState)("");
+  const [saved, setSaved] = (0, import_react10.useState)(0);
+  const inp = (0, import_react10.useRef)(null);
+  (0, import_react10.useEffect)(() => {
     if (edit && inp.current) {
       inp.current.focus();
       inp.current.select();
@@ -6077,8 +6522,8 @@ function TodoRow({ arrived = -1, onLanded, rowRef, t, i, onToggle, onEdit, onDel
   };
   const phase = dying && dying.phase;
   const chars = [...t.title], dust = dustOf(t.id, chars.length);
-  const [, tick2] = (0, import_react8.useState)(0);
-  (0, import_react8.useEffect)(() => {
+  const [, tick2] = (0, import_react10.useState)(0);
+  (0, import_react10.useEffect)(() => {
     if (phase !== "undo") return;
     const iv = setInterval(() => tick2((x) => x + 1), 250);
     return () => clearInterval(iv);
@@ -6086,10 +6531,10 @@ function TodoRow({ arrived = -1, onLanded, rowRef, t, i, onToggle, onEdit, onDel
   const left = dying && dying.end ? Math.max(1, Math.ceil((dying.end - Date.now()) / 1e3)) : 0;
   const base = { borderTop: i ? "1px solid var(--rule)" : 0, animationDelay: delay };
   if (phase === "undo" || phase === "gone") {
-    return /* @__PURE__ */ import_react8.default.createElement("div", { ref: rowRef, className: "lf-row lf-todo lf-todo-undo" + (phase === "gone" ? " gone" : ""), style: base, role: "status" }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-todo-ghost" }, "已删除 ", /* @__PURE__ */ import_react8.default.createElement("s", null, t.title)), /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "lf-sweep-btn pending", onClick: () => onRestore(t), style: { "--dur": "4s" }, "aria-label": "撤销删除，还剩 " + left + " 秒" }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sweep-glow" }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sweep-num" }, /* @__PURE__ */ import_react8.default.createElement("span", { key: left, className: "lf-roll" }, left)), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sweep-label" }, "撤销"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sweep-undo" }, /* @__PURE__ */ import_react8.default.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M9 14L4 9l5-5" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M4 9h10a6 6 0 0 1 0 12h-3" })))));
+    return /* @__PURE__ */ import_react10.default.createElement("div", { ref: rowRef, className: "lf-row lf-todo lf-todo-undo" + (phase === "gone" ? " gone" : ""), style: base, role: "status" }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-todo-ghost" }, "已删除 ", /* @__PURE__ */ import_react10.default.createElement("s", null, t.title)), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "lf-sweep-btn pending", onClick: () => onRestore(t), style: { "--dur": "4s" }, "aria-label": "撤销删除，还剩 " + left + " 秒" }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sweep-glow" }), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sweep-num" }, /* @__PURE__ */ import_react10.default.createElement("span", { key: left, className: "lf-roll" }, left)), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sweep-label" }, "撤销"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sweep-undo" }, /* @__PURE__ */ import_react10.default.createElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M9 14L4 9l5-5" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M4 9h10a6 6 0 0 1 0 12h-3" })))));
   }
   const dustOn = phase === "dust", back = phase === "back";
-  return /* @__PURE__ */ import_react8.default.createElement(
+  return /* @__PURE__ */ import_react10.default.createElement(
     "div",
     {
       className: "lf-row lf-todo" + (t.done ? " done" : "") + cls + (dustOn ? " dust" : "") + (back ? " back" : "") + (edit ? " editing" : "") + (saved && Date.now() - saved < 1200 ? " saved" : "") + (arrived >= 0 ? " lf-arrive" : ""),
@@ -6099,7 +6544,7 @@ function TodoRow({ arrived = -1, onLanded, rowRef, t, i, onToggle, onEdit, onDel
         if (arrived >= 0 && e.animationName === "lf-arrive" && e.target === e.currentTarget) onLanded && onLanded(t.id);
       }
     },
-    edit ? /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-check" + (t.done ? " on" : ""), "aria-hidden": "true" }, t.done && /* @__PURE__ */ import_react8.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M5 12.5l4.5 4.5L19 7.5" }))), /* @__PURE__ */ import_react8.default.createElement(
+    edit ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-check" + (t.done ? " on" : ""), "aria-hidden": "true" }, t.done && /* @__PURE__ */ import_react10.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M5 12.5l4.5 4.5L19 7.5" }))), /* @__PURE__ */ import_react10.default.createElement(
       "input",
       {
         ref: inp,
@@ -6119,7 +6564,7 @@ function TodoRow({ arrived = -1, onLanded, rowRef, t, i, onToggle, onEdit, onDel
         "aria-label": "改这件事，末尾写数字就是金额",
         placeholder: "比如：交水电费 180"
       }
-    ), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-todo-hint" }, "回车保存 · Esc 取消")) : /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "lf-todo-hit", onClick: (ev) => !dying && onToggle(t, ev), "aria-pressed": t.done, disabled: !!dustOn }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-check" + (t.done ? " on" : "") }, t.done && /* @__PURE__ */ import_react8.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { className: "lf-tick", d: "M5 12.5l4.5 4.5L19 7.5", pathLength: "1" }))), /* @__PURE__ */ import_react8.default.createElement("span", { style: { flex: 1, minWidth: 0, fontSize: 15, color: t.done ? "var(--ink3)" : C2.ink, transition: "color .3s" } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-strike" }, chars.map((c, k) => /* @__PURE__ */ import_react8.default.createElement("span", { key: k, className: "lf-ch", style: { "--dx": dust[k].x + "px", "--dy": dust[k].y + "px", "--rot": dust[k].rot + "deg", "--s": dust[k].s, "--i": k } }, c))))), t.amount ? /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-chip lf-todo-amt", "data-ev": evAmount ? "todos.amount" : void 0, style: { background: t.done ? "var(--fill)" : DOMAIN.money.soft, color: t.done ? "var(--ink3)" : "var(--money-ink)", height: 24 } }, money(t.amount)) : null, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-todo-acts" }, /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "lf-todo-act", onClick: startEdit, "aria-label": "改「" + t.title + "」", title: "改一下" }, /* @__PURE__ */ import_react8.default.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M4 20h4L19 9l-4-4L4 16v4z" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M13.5 6.5l4 4" }))), /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "lf-todo-act del", onClick: () => onDelete(t), "aria-label": "删除「" + t.title + "」", title: "删掉" }, /* @__PURE__ */ import_react8.default.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M5 7h14" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M10 7V5h4v2" }), /* @__PURE__ */ import_react8.default.createElement("path", { d: "M7 7l1 12h8l1-12" })))))
+    ), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-todo-hint" }, "回车保存 · Esc 取消")) : /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "lf-todo-hit", onClick: (ev) => !dying && onToggle(t, ev), "aria-pressed": t.done, disabled: !!dustOn }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-check" + (t.done ? " on" : "") }, t.done && /* @__PURE__ */ import_react10.default.createElement("svg", { width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { className: "lf-tick", d: "M5 12.5l4.5 4.5L19 7.5", pathLength: "1" }))), /* @__PURE__ */ import_react10.default.createElement("span", { style: { flex: 1, minWidth: 0, fontSize: 15, color: t.done ? "var(--ink3)" : C2.ink, transition: "color .3s" } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-strike" }, chars.map((c, k) => /* @__PURE__ */ import_react10.default.createElement("span", { key: k, className: "lf-ch", style: { "--dx": dust[k].x + "px", "--dy": dust[k].y + "px", "--rot": dust[k].rot + "deg", "--s": dust[k].s, "--i": k } }, c))))), t.amount ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-chip lf-todo-amt", "data-ev": evAmount ? "todos.amount" : void 0, style: { background: t.done ? "var(--fill)" : DOMAIN.money.soft, color: t.done ? "var(--ink3)" : "var(--money-ink)", height: 24 } }, money(t.amount)) : null, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-todo-acts" }, /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "lf-todo-act", onClick: startEdit, "aria-label": "改「" + t.title + "」", title: "改一下" }, /* @__PURE__ */ import_react10.default.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M4 20h4L19 9l-4-4L4 16v4z" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M13.5 6.5l4 4" }))), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "lf-todo-act del", onClick: () => onDelete(t), "aria-label": "删除「" + t.title + "」", title: "删掉" }, /* @__PURE__ */ import_react10.default.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M5 7h14" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M10 7V5h4v2" }), /* @__PURE__ */ import_react10.default.createElement("path", { d: "M7 7l1 12h8l1-12" })))))
   );
 }
 function BackTodos({ records, today, onRestore }) {
@@ -6132,20 +6577,20 @@ function BackTodos({ records, today, onRestore }) {
     if (g && g.label === label) g.items.push(t);
     else groups.push({ label, items: [t] });
   });
-  const [back, setBack] = (0, import_react8.useState)({});
+  const [back, setBack] = (0, import_react10.useState)({});
   const putBack = (t) => {
     if (back[t.id]) return;
     setBack((b) => ({ ...b, [t.id]: true }));
     setTimeout(() => onRestore(t), 520);
   };
-  return /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-back" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 8 } }, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h" }, "做完收起来的"), /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 12, color: "var(--ink3)" } }, list.length ? "共 " + list.length + " 件 · " : "", "点空白处翻回去")), list.length === 0 ? /* @__PURE__ */ import_react8.default.createElement("p", { className: "lf-sub", style: { margin: "8px 0" } }, "还没有收起来的事。清掉已完成的、或者前一天做完的，都会到这里。") : /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-archive lf-inner-scroll" }, groups.map((g) => /* @__PURE__ */ import_react8.default.createElement("div", { key: g.label, className: "lf-archive-group" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-archive-day" }, g.label), g.items.map((t, i) => /* @__PURE__ */ import_react8.default.createElement("div", { key: t.id, className: "lf-archive-item" + (back[t.id] ? " out" : ""), style: { animationDelay: Math.min(i, 8) * 0.04 + "s" } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-archive-tick" }, /* @__PURE__ */ import_react8.default.createElement("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3.5", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react8.default.createElement("path", { d: "M5 12.5l4.5 4.5L19 7.5" }))), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-archive-title" }, t.title), t.amount ? /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-archive-amt" }, money(t.amount)) : null, /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "lf-archive-back", onClick: () => putBack(t), title: "放回「要做的事」，重新变成没做完" }, "放回去")))))));
+  return /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-back" }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 8 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "做完收起来的"), /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 12, color: "var(--ink3)" } }, list.length ? "共 " + list.length + " 件 · " : "", "点空白处翻回去")), list.length === 0 ? /* @__PURE__ */ import_react10.default.createElement("p", { className: "lf-sub", style: { margin: "8px 0" } }, "还没有收起来的事。清掉已完成的、或者前一天做完的，都会到这里。") : /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-archive lf-inner-scroll" }, groups.map((g) => /* @__PURE__ */ import_react10.default.createElement("div", { key: g.label, className: "lf-archive-group" }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-archive-day" }, g.label), g.items.map((t, i) => /* @__PURE__ */ import_react10.default.createElement("div", { key: t.id, className: "lf-archive-item" + (back[t.id] ? " out" : ""), style: { animationDelay: Math.min(i, 8) * 0.04 + "s" } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-archive-tick" }, /* @__PURE__ */ import_react10.default.createElement("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3.5", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react10.default.createElement("path", { d: "M5 12.5l4.5 4.5L19 7.5" }))), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-archive-title" }, t.title), t.amount ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-archive-amt" }, money(t.amount)) : null, /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "lf-archive-back", onClick: () => putBack(t), title: "放回「要做的事」，重新变成没做完" }, "放回去")))))));
 }
 function TodayNudges({ part, S: S2, ghosts, usual, focused, onPick, onInsight, pinned }) {
   const slots = ghosts.slice().sort((a, b) => a.h - b.h).slice(0, 3);
   const tips = S2.insights.slice(0, 4);
-  const [ti, setTi] = (0, import_react8.useState)(0);
-  const [hold, setHold] = (0, import_react8.useState)(false);
-  (0, import_react8.useEffect)(() => {
+  const [ti, setTi] = (0, import_react10.useState)(0);
+  const [hold, setHold] = (0, import_react10.useState)(false);
+  (0, import_react10.useEffect)(() => {
     if (hold || tips.length < 2) return;
     const iv = setInterval(() => setTi((x) => x + 1), 5200);
     return () => clearInterval(iv);
@@ -6159,7 +6604,7 @@ function TodayNudges({ part, S: S2, ghosts, usual, focused, onPick, onInsight, p
     ...usual.slice(0, 4).map((u) => ({ key: "u" + u, text: u, phrase: u }))
   ];
   const keep = (e) => e.preventDefault();
-  return /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-nudges" + (focused ? " focus" : "") }, part === "sugs" && /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-sugs" + (focused && sugs.length ? " on" : ""), "aria-hidden": !focused }, sugs.map((g, i) => /* @__PURE__ */ import_react8.default.createElement(
+  return /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-nudges" + (focused ? " focus" : "") }, part === "sugs" && /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-sugs" + (focused && sugs.length ? " on" : ""), "aria-hidden": !focused }, sugs.map((g, i) => /* @__PURE__ */ import_react10.default.createElement(
     "button",
     {
       key: g.key,
@@ -6170,37 +6615,37 @@ function TodayNudges({ part, S: S2, ghosts, usual, focused, onPick, onInsight, p
       onMouseDown: keep,
       onClick: () => onPick(g.phrase)
     },
-    g.c && /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sug-dot" }),
+    g.c && /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sug-dot" }),
     g.text,
-    g.sub && /* @__PURE__ */ import_react8.default.createElement("em", null, g.sub)
-  ))), part === "tip" && tip && /* @__PURE__ */ import_react8.default.createElement("button", { type: "button", className: "lf-tip" + (pinned && pinned.id === tip.id ? " on" : ""), onMouseEnter: () => setHold(true), onMouseLeave: () => setHold(false), onClick: () => onInsight(tip), title: "点一下，在下面的卡片上看它们怎么连起来" }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-tip-dots" }, /* @__PURE__ */ import_react8.default.createElement("i", { style: { background: tone(tip.from) } }), /* @__PURE__ */ import_react8.default.createElement("b", null), /* @__PURE__ */ import_react8.default.createElement("i", { style: { background: tone(tip.to) } })), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-tip-win" }, /* @__PURE__ */ import_react8.default.createElement("span", { key: tip.id + ti, className: "lf-tip-text" }, tip.text)), tips.length > 1 && /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-tip-pager" }, tips.map((_, k) => /* @__PURE__ */ import_react8.default.createElement("i", { key: k, className: k === ti % tips.length ? "on" : "" })))));
+    g.sub && /* @__PURE__ */ import_react10.default.createElement("em", null, g.sub)
+  ))), part === "tip" && tip && /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "lf-tip" + (pinned && pinned.id === tip.id ? " on" : ""), onMouseEnter: () => setHold(true), onMouseLeave: () => setHold(false), onClick: () => onInsight(tip), title: "点一下，在下面的卡片上看它们怎么连起来" }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-tip-dots" }, /* @__PURE__ */ import_react10.default.createElement("i", { style: { background: tone(tip.from) } }), /* @__PURE__ */ import_react10.default.createElement("b", null), /* @__PURE__ */ import_react10.default.createElement("i", { style: { background: tone(tip.to) } })), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-tip-win" }, /* @__PURE__ */ import_react10.default.createElement("span", { key: tip.id + ti, className: "lf-tip-text" }, tip.text)), tips.length > 1 && /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-tip-pager" }, tips.map((_, k) => /* @__PURE__ */ import_react10.default.createElement("i", { key: k, className: k === ti % tips.length ? "on" : "" })))));
 }
 function EnergyTaste({ S: S2, pour }) {
-  const ref = (0, import_react8.useRef)(null);
+  const ref = (0, import_react10.useRef)(null);
   const t = useTaste(ref, S2);
   const cap = Math.max(GOALS.kcal + S2.burned, S2.kcalIn) * 1.05;
   const pct = (v) => v / cap * 100 + "%";
-  return /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("div", { ref, style: { position: "relative" } }, /* @__PURE__ */ import_react8.default.createElement(LiquidBar, { eaten: S2.kcalIn, goal: GOALS.kcal, burned: S2.burned, cap, meals: S2.meals, preview: t && t.mode === "taste" ? t.k : null, pour }), t && t.mode === "taste" && t.more > 0 && /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-taste-tip", style: { left: `clamp(20px, ${pct(t.k)}, calc(100% - 20px))`, color: t.left < 0 ? "#C8373C" : void 0 } }, "+", num(t.more))), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginTop: 12, fontSize: 13, color: "var(--ink2)", minHeight: 18 } }, !t ? /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-row", "data-ev": "energy.eaten", style: { gap: 6 } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-dot", style: { background: C2.food } }), "吃了 ", /* @__PURE__ */ import_react8.default.createElement(Num, { value: S2.kcalIn })), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-row", style: { gap: 6 } }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-dot", style: { background: C2.move } }), "练掉 ", /* @__PURE__ */ import_react8.default.createElement(Num, { value: S2.burned }))) : t.mode === "meal" ? /* @__PURE__ */ import_react8.default.createElement("span", { key: "meal", className: "lf-swap lf-tab", style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, t.meal ? fmtTime(t.meal.t) + " " + (MEAL_NAME[t.meal.meal] || "") + " · " + t.meal.title + " · " + num(t.meal.kcal) + " 千卡" : "今天还没吃东西") : /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-swap lf-tab", key: "t1" }, "要是再吃 ", /* @__PURE__ */ import_react8.default.createElement("b", { style: { color: "var(--food-ink)" } }, num(t.more)), " 千卡"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-swap lf-tab", key: "t2", style: { color: t.left < 0 ? C2.link : void 0 } }, t.left < 0 ? "会超出 " + num(-t.left) : "还剩 " + num(t.left)))));
+  return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("div", { ref, style: { position: "relative" } }, /* @__PURE__ */ import_react10.default.createElement(LiquidBar, { eaten: S2.kcalIn, goal: GOALS.kcal, burned: S2.burned, cap, meals: S2.meals, preview: t && t.mode === "taste" ? t.k : null, pour }), t && t.mode === "taste" && t.more > 0 && /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-taste-tip", style: { left: `clamp(20px, ${pct(t.k)}, calc(100% - 20px))`, color: t.left < 0 ? "#C8373C" : void 0 } }, "+", num(t.more))), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginTop: 12, fontSize: 13, color: "var(--ink2)", minHeight: 18 } }, !t ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", "data-ev": "energy.eaten", style: { gap: 6 } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-dot", style: { background: C2.food } }), "吃了 ", /* @__PURE__ */ import_react10.default.createElement(Num, { value: S2.kcalIn })), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 6 } }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-dot", style: { background: C2.move } }), "练掉 ", /* @__PURE__ */ import_react10.default.createElement(Num, { value: S2.burned }))) : t.mode === "meal" ? /* @__PURE__ */ import_react10.default.createElement("span", { key: "meal", className: "lf-swap lf-tab", style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, t.meal ? fmtTime(t.meal.t) + " " + (MEAL_NAME[t.meal.meal] || "") + " · " + t.meal.title + " · " + num(t.meal.kcal) + " 千卡" : "今天还没吃东西") : /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-swap lf-tab", key: "t1" }, "要是再吃 ", /* @__PURE__ */ import_react10.default.createElement("b", { style: { color: "var(--food-ink)" } }, num(t.more)), " 千卡"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-swap lf-tab", key: "t2", style: { color: t.left < 0 ? C2.link : void 0 } }, t.left < 0 ? "会超出 " + num(-t.left) : "还剩 " + num(t.left)))));
 }
 function SleepBody({ S: S2 }) {
-  const ref = (0, import_react8.useRef)(null);
+  const ref = (0, import_react10.useRef)(null);
   const row = useSleepRow(ref, 7);
   const d = row != null ? S2.week[row] : null;
-  return /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-sleep-body" + (d ? " scan" : "") }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", alignItems: "flex-end" } }, /* @__PURE__ */ import_react8.default.createElement("div", null, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h", style: { opacity: 0.85, fontWeight: 500, fontSize: 14 } }, "这周平均每晚"), /* @__PURE__ */ import_react8.default.createElement(Num, { value: S2.sleepAvg, format: (v) => fmtHM(v), style: { fontSize: 44, fontWeight: 500, lineHeight: 1.05 } })), d ? /* @__PURE__ */ import_react8.default.createElement("span", { key: "scan", className: "lf-swap lf-tab", style: { fontSize: 13, opacity: 0.9, textAlign: "right" } }, "周", d.label, d.today ? "（昨晚）" : "", /* @__PURE__ */ import_react8.default.createElement("br", null), /* @__PURE__ */ import_react8.default.createElement("b", { style: { fontSize: 16 } }, d.sleep ? fmtHM(d.sleep.bed % 24) + " → " + fmtHM((d.sleep.bed + d.sleep.hours) % 24) : "没记")) : /* @__PURE__ */ import_react8.default.createElement("span", { style: { fontSize: 13, opacity: 0.8, textAlign: "right" } }, "昨晚", /* @__PURE__ */ import_react8.default.createElement("br", null), /* @__PURE__ */ import_react8.default.createElement("b", { "data-ev": "sleep.last", style: { fontSize: 16, display: "inline-block" } }, S2.lastNight ? fmtHM(S2.lastNight.hours) : "没记"))), /* @__PURE__ */ import_react8.default.createElement(SleepBars, { week: S2.week, rowsRef: ref, on: row }));
+  return /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-sleep-body" + (d ? " scan" : "") }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", alignItems: "flex-end" } }, /* @__PURE__ */ import_react10.default.createElement("div", null, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h", style: { opacity: 0.85, fontWeight: 500, fontSize: 14 } }, "这周平均每晚"), /* @__PURE__ */ import_react10.default.createElement(Num, { value: S2.sleepAvg, format: (v) => fmtHM(v), style: { fontSize: 44, fontWeight: 500, lineHeight: 1.05 } })), d ? /* @__PURE__ */ import_react10.default.createElement("span", { key: "scan", className: "lf-swap lf-tab", style: { fontSize: 13, opacity: 0.9, textAlign: "right" } }, "周", d.label, d.today ? "（昨晚）" : "", /* @__PURE__ */ import_react10.default.createElement("br", null), /* @__PURE__ */ import_react10.default.createElement("b", { style: { fontSize: 16 } }, d.sleep ? fmtHM(d.sleep.bed % 24) + " → " + fmtHM((d.sleep.bed + d.sleep.hours) % 24) : "没记")) : /* @__PURE__ */ import_react10.default.createElement("span", { style: { fontSize: 13, opacity: 0.8, textAlign: "right" } }, "昨晚", /* @__PURE__ */ import_react10.default.createElement("br", null), /* @__PURE__ */ import_react10.default.createElement("b", { "data-ev": "sleep.last", style: { fontSize: 16, display: "inline-block" } }, S2.lastNight ? fmtHM(S2.lastNight.hours) : "没记"))), /* @__PURE__ */ import_react10.default.createElement(SleepBars, { week: S2.week, rowsRef: ref, on: row }));
 }
 function SleepBars({ week, rowsRef, on }) {
   const span = 12;
-  return /* @__PURE__ */ import_react8.default.createElement("div", { "data-ev": "sleep.bars", style: { display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 6, marginTop: 16, flex: 1 } }, /* @__PURE__ */ import_react8.default.createElement("div", { ref: rowsRef, style: { display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 6, flex: 1 } }, week.map((d, i) => /* @__PURE__ */ import_react8.default.createElement("div", { key: d.day, className: "lf-row lf-sleep-row" + (on === i ? " on" : ""), style: { gap: 10 } }, /* @__PURE__ */ import_react8.default.createElement("span", { style: { width: 14, fontSize: 12, opacity: d.today ? 1 : 0.7, fontWeight: d.today ? 700 : 400 } }, d.label), /* @__PURE__ */ import_react8.default.createElement("div", { style: { position: "relative", flex: 1, height: 12 } }, d.sleep && /* @__PURE__ */ import_react8.default.createElement("div", { key: d.day + "-" + d.sleep.hours, className: "lf-growx", title: fmtHM(d.sleep.hours), style: { position: "absolute", top: 0, height: 12, borderRadius: 6, left: (d.sleep.bed - 22) / span * 100 + "%", width: d.sleep.hours / span * 100 + "%", background: d.today || on === i ? "#fff" : "rgba(255,255,255,.4)", boxShadow: on === i ? "0 0 12px rgba(255,255,255,.6)" : "none", transition: "all .7s cubic-bezier(.2,.8,.2,1), box-shadow .2s, background .2s" } }))))), /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row lf-num", style: { justifyContent: "space-between", paddingLeft: 24, fontSize: 11.5, opacity: 0.75 } }, [22, 0, 2, 4, 6, 8, 10].map((x) => /* @__PURE__ */ import_react8.default.createElement("span", { key: x }, x))));
+  return /* @__PURE__ */ import_react10.default.createElement("div", { "data-ev": "sleep.bars", style: { display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 6, marginTop: 16, flex: 1 } }, /* @__PURE__ */ import_react10.default.createElement("div", { ref: rowsRef, style: { display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 6, flex: 1 } }, week.map((d, i) => /* @__PURE__ */ import_react10.default.createElement("div", { key: d.day, className: "lf-row lf-sleep-row" + (on === i ? " on" : ""), style: { gap: 10 } }, /* @__PURE__ */ import_react10.default.createElement("span", { style: { width: 14, fontSize: 12, opacity: d.today ? 1 : 0.7, fontWeight: d.today ? 700 : 400 } }, d.label), /* @__PURE__ */ import_react10.default.createElement("div", { style: { position: "relative", flex: 1, height: 12 } }, d.sleep && /* @__PURE__ */ import_react10.default.createElement("div", { key: d.day + "-" + d.sleep.hours, className: "lf-growx", title: fmtHM(d.sleep.hours), style: { position: "absolute", top: 0, height: 12, borderRadius: 6, left: (d.sleep.bed - 22) / span * 100 + "%", width: d.sleep.hours / span * 100 + "%", background: d.today || on === i ? "#fff" : "rgba(255,255,255,.4)", boxShadow: on === i ? "0 0 12px rgba(255,255,255,.6)" : "none", transition: "all .7s cubic-bezier(.2,.8,.2,1), box-shadow .2s, background .2s" } }))))), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row lf-num", style: { justifyContent: "space-between", paddingLeft: 24, fontSize: 11.5, opacity: 0.75 } }, [22, 0, 2, 4, 6, 8, 10].map((x) => /* @__PURE__ */ import_react10.default.createElement("span", { key: x }, x))));
 }
 function WeightLine({ weights, now }) {
   const pts = weights.filter((w) => w.t > now - 30 * 864e5);
-  if (pts.length < 2) return /* @__PURE__ */ import_react8.default.createElement("div", { style: { height: "100%" } });
+  if (pts.length < 2) return /* @__PURE__ */ import_react10.default.createElement("div", { style: { height: "100%" } });
   const W2 = 220, H2 = 64, min = Math.min(...pts.map((p) => p.kg)) - 0.2, max = Math.max(...pts.map((p) => p.kg)) + 0.2;
   const x = (t) => (t - pts[0].t) / (pts[pts.length - 1].t - pts[0].t || 1) * (W2 - 8) + 4;
   const y = (k) => H2 - 6 - (k - min) / (max - min || 1) * (H2 - 12);
   const d = pts.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + " " + y(p.kg).toFixed(1)).join(" ");
   const last = pts[pts.length - 1];
-  return /* @__PURE__ */ import_react8.default.createElement("svg", { viewBox: `0 0 ${W2} ${H2}`, width: "100%", height: "100%", preserveAspectRatio: "none", style: { display: "block" }, role: "img", "aria-label": "30 天体重从 " + pts[0].kg + " 到 " + last.kg }, /* @__PURE__ */ import_react8.default.createElement("path", { d: d + ` L${x(last.t)} ${H2} L4 ${H2} Z`, style: { fill: "color-mix(in srgb,#0E8A8A 16%,var(--card))" } }), /* @__PURE__ */ import_react8.default.createElement("path", { d, fill: "none", stroke: C2.body, strokeWidth: "2.2", strokeLinejoin: "round", strokeLinecap: "round", vectorEffect: "non-scaling-stroke", className: "lf-fadein" }));
+  return /* @__PURE__ */ import_react10.default.createElement("svg", { viewBox: `0 0 ${W2} ${H2}`, width: "100%", height: "100%", preserveAspectRatio: "none", style: { display: "block" }, role: "img", "aria-label": "30 天体重从 " + pts[0].kg + " 到 " + last.kg }, /* @__PURE__ */ import_react10.default.createElement("path", { d: d + ` L${x(last.t)} ${H2} L4 ${H2} Z`, style: { fill: "color-mix(in srgb,#0E8A8A 16%,var(--card))" } }), /* @__PURE__ */ import_react10.default.createElement("path", { d, fill: "none", stroke: C2.body, strokeWidth: "2.2", strokeLinejoin: "round", strokeLinecap: "round", vectorEffect: "non-scaling-stroke", className: "lf-fadein" }));
 }
 function WeekBoard({ S: S2 }) {
   const nextMove = S2.events.find((e) => e.domain === "move" && !e.done && e.t > S2.now);
@@ -6212,13 +6657,13 @@ function WeekBoard({ S: S2 }) {
     days.push({ day, evs, clash: new Set(clash.map((c) => c.id)), label: i === 0 ? "今天" : i === 1 ? "明天" : "周" + "日一二三四五六"[new Date(day).getDay()], date: new Date(day).getDate() });
   }
   const clashDay = days.find((d) => d.clash.size);
-  return /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 14 } }, /* @__PURE__ */ import_react8.default.createElement("h2", { className: "lf-h" }, "接下来七天"), /* @__PURE__ */ import_react8.default.createElement("span", { className: "lf-sub", style: { color: clashDay ? "var(--warn-ink)" : void 0 } }, clashDay ? clashDay.label + " 有两个安排撞了" : "没有冲突")), /* @__PURE__ */ import_react8.default.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 8 } }, days.map((d, i) => /* @__PURE__ */ import_react8.default.createElement("div", { key: d.day, style: { display: "flex", flexDirection: "column", gap: 6, minWidth: 0 } }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-row", style: { gap: 6, height: 40, borderRadius: 14, justifyContent: "center", background: i === 0 ? "var(--ink)" : "var(--fill)", color: i === 0 ? "var(--card)" : C2.ink, fontSize: 13 } }, /* @__PURE__ */ import_react8.default.createElement("span", { style: { opacity: 0.75 } }, d.label), /* @__PURE__ */ import_react8.default.createElement("b", { className: "lf-num" }, d.date)), d.evs.length === 0 && /* @__PURE__ */ import_react8.default.createElement("span", { style: { height: 44, borderRadius: 12, border: "1.5px dashed var(--line)" } }), d.evs.map((e) => {
+  return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 14 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "接下来七天"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub", style: { color: clashDay ? "var(--warn-ink)" : void 0 } }, clashDay ? clashDay.label + " 有两个安排撞了" : "没有冲突")), /* @__PURE__ */ import_react10.default.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 8 } }, days.map((d, i) => /* @__PURE__ */ import_react10.default.createElement("div", { key: d.day, style: { display: "flex", flexDirection: "column", gap: 6, minWidth: 0 } }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { gap: 6, height: 40, borderRadius: 14, justifyContent: "center", background: i === 0 ? "var(--ink)" : "var(--fill)", color: i === 0 ? "var(--card)" : C2.ink, fontSize: 13 } }, /* @__PURE__ */ import_react10.default.createElement("span", { style: { opacity: 0.75 } }, d.label), /* @__PURE__ */ import_react10.default.createElement("b", { className: "lf-num" }, d.date)), d.evs.length === 0 && /* @__PURE__ */ import_react10.default.createElement("span", { style: { height: 44, borderRadius: 12, border: "1.5px dashed var(--line)" } }), d.evs.map((e) => {
     const clash = d.clash.has(e.id), move = e.domain === "move", tc = TONES[eventTone(e)];
-    return /* @__PURE__ */ import_react8.default.createElement("div", { key: e.id, "data-ev": nextMove && e.id === nextMove.id ? "week.move" : void 0, style: { borderRadius: 12, padding: "7px 9px", minWidth: 0, background: clash ? "color-mix(in srgb,#E5484D 13%,var(--card))" : move ? e.done ? "color-mix(in srgb,#1E9E6A 14%,var(--card))" : C2.move : e.t < S2.now ? "var(--fill)" : tc, color: clash ? "var(--warn-ink)" : move ? e.done ? "var(--move-ink)" : "#fff" : e.t < S2.now ? "var(--ink3)" : "#fff", boxShadow: clash ? "inset 0 0 0 1.5px #E5484D" : "none" } }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "lf-num", style: { fontSize: 11, opacity: 0.8 } }, fmtTime(e.t), e.done ? " · 已完成" : ""), /* @__PURE__ */ import_react8.default.createElement("div", { style: { fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, e.title));
+    return /* @__PURE__ */ import_react10.default.createElement("div", { key: e.id, "data-ev": nextMove && e.id === nextMove.id ? "week.move" : void 0, style: { borderRadius: 12, padding: "7px 9px", minWidth: 0, background: clash ? "color-mix(in srgb,#E5484D 13%,var(--card))" : move ? e.done ? "color-mix(in srgb,#1E9E6A 14%,var(--card))" : C2.move : e.t < S2.now ? "var(--fill)" : tc, color: clash ? "var(--warn-ink)" : move ? e.done ? "var(--move-ink)" : "#fff" : e.t < S2.now ? "var(--ink3)" : "#fff", boxShadow: clash ? "inset 0 0 0 1.5px #E5484D" : "none" } }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-num", style: { fontSize: 11, opacity: 0.8 } }, fmtTime(e.t), e.done ? " · 已完成" : ""), /* @__PURE__ */ import_react10.default.createElement("div", { style: { fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, e.title));
   })))));
 }
 function domainOf(r) {
-  return { meal: "food", expense: "money", income: "money", workout: "move", sleep: "sleep", weight: "body", todo: "time" }[r.type] || (r.domain === "move" ? "move" : "time");
+  return { meal: "food", expense: "money", income: "money", workout: "move", sleep: "sleep", weight: "body", todo: "time", routine: "routine" }[r.type] || (r.domain === "move" ? "move" : "time");
 }
 function labelOf(r) {
   switch (r.type) {
@@ -6238,6 +6683,8 @@ function labelOf(r) {
       return "日程 " + fmtTime(r.t);
     case "todo":
       return "待办" + (r.amount ? " " + money(r.amount) : "");
+    case "routine":
+      return routineName(r.kind) + (r.amount ? " " + r.amount + " ml" : "");
     default:
       return r.title;
   }
@@ -6262,12 +6709,12 @@ function highlight(text, tokens) {
   const out = [];
   let p = 0;
   marks.forEach((m, k) => {
-    if (m.s > p) out.push(/* @__PURE__ */ import_react8.default.createElement("span", { key: "t" + k }, text.slice(p, m.s)));
+    if (m.s > p) out.push(/* @__PURE__ */ import_react10.default.createElement("span", { key: "t" + k }, text.slice(p, m.s)));
     const bg = C2[m.d] === "#1F2328" ? "#F4F5F1" : C2[m.d];
-    out.push(/* @__PURE__ */ import_react8.default.createElement("span", { key: "m" + k, className: "lf-token", style: { background: bg, color: m.d === "food" || m.d === "time" ? "#1F2328" : "#fff" } }, text.slice(m.s, m.e)));
+    out.push(/* @__PURE__ */ import_react10.default.createElement("span", { key: "m" + k, className: "lf-token", style: { background: bg, color: m.d === "food" || m.d === "time" ? "#1F2328" : "#fff" } }, text.slice(m.s, m.e)));
     p = m.e;
   });
-  if (p < text.length) out.push(/* @__PURE__ */ import_react8.default.createElement("span", { key: "end" }, text.slice(p)));
+  if (p < text.length) out.push(/* @__PURE__ */ import_react10.default.createElement("span", { key: "end" }, text.slice(p)));
   return out;
 }
 function storyOf(S2) {
@@ -6282,21 +6729,21 @@ function storyOf(S2) {
 }
 
 // src/icon.jsx
-var import_react9 = __toESM(require("react"));
+var import_react11 = __toESM(require("react"));
 function DialIcon(props) {
   const s = props && props.size || 18;
-  return /* @__PURE__ */ import_react9.default.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.9", strokeLinecap: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react9.default.createElement("circle", { cx: "12", cy: "12", r: "8.5", strokeOpacity: ".35" }), /* @__PURE__ */ import_react9.default.createElement("path", { d: "M12 3.5a8.5 8.5 0 0 1 8.2 6.3" }), /* @__PURE__ */ import_react9.default.createElement("path", { d: "M5.2 17.1a8.5 8.5 0 0 0 4.6 3.1" }), /* @__PURE__ */ import_react9.default.createElement("path", { d: "M12 12l4.2 3" }), /* @__PURE__ */ import_react9.default.createElement("circle", { cx: "12", cy: "12", r: "1.6", fill: "currentColor", stroke: "none" }));
+  return /* @__PURE__ */ import_react11.default.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.9", strokeLinecap: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react11.default.createElement("circle", { cx: "12", cy: "12", r: "8.5", strokeOpacity: ".35" }), /* @__PURE__ */ import_react11.default.createElement("path", { d: "M12 3.5a8.5 8.5 0 0 1 8.2 6.3" }), /* @__PURE__ */ import_react11.default.createElement("path", { d: "M5.2 17.1a8.5 8.5 0 0 0 4.6 3.1" }), /* @__PURE__ */ import_react11.default.createElement("path", { d: "M12 12l4.2 3" }), /* @__PURE__ */ import_react11.default.createElement("circle", { cx: "12", cy: "12", r: "1.6", fill: "currentColor", stroke: "none" }));
 }
 
 // src/plugin.jsx
-var PANEL = "rigui";
+var PANEL = "rigui-pro";
 function LifePanel() {
-  return /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-host", style: { flex: "auto", width: "100%", minWidth: 0, height: "100%", minHeight: 0, overflowX: "hidden", overflowY: "auto", overscrollBehavior: "contain", background: "#E8EAE5" } }, /* @__PURE__ */ import_react10.default.createElement(LifeApp, null));
+  return /* @__PURE__ */ import_react12.default.createElement("div", { className: "lf-host", style: { flex: "auto", width: "100%", minWidth: 0, height: "100%", minHeight: 0, overflowX: "hidden", overflowY: "auto", overscrollBehavior: "contain", background: "#E8EAE5" } }, /* @__PURE__ */ import_react12.default.createElement(LifeApp, null));
 }
 var isPlugin = true;
 var inject = ["slots"];
 function apply(ctx) {
-  ctx.slots.inject("sidebar.panellist", () => ctx.slots.register({ name: "sidebar.panellist", id: PANEL, order: 5, label: () => "日晷" }, DialIcon));
+  ctx.slots.inject("sidebar.panellist", () => ctx.slots.register({ name: "sidebar.panellist", id: PANEL, order: 5, label: () => "日晷 Pro" }, DialIcon));
   ctx.slots.inject("main", () => ctx.slots.register({ name: "main", key: PANEL }, LifePanel));
 }
 
