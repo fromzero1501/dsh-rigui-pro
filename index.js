@@ -16,6 +16,10 @@ export const inject = ['llm', 'connection']
 
 const ROUTE = '/api/rigui-pro'
 const AI_TIMEOUT_MS = 45000
+const PLAN_TIMEOUT_MS = 180000
+// 排程的输出上限：按你的要求给到 128K。
+// 提供方对上限的接受度不一（有的模型只认 8K），被拒就自动降档重试，不会因为撞上限就排不出来。
+const AI_MAX_TOKENS = 128000
 const STORE_FILE = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'rigui-pro.json')
 const DAY = 86400000
 
@@ -718,35 +722,58 @@ function makeAsk(ctx, getAI) {
     return { provider, model }
   }
 
-  return async function ask(system, user, { signal, maxTokens = 1600, strong = false } = {}) {
+  return async function ask(system, user, { signal, maxTokens = AI_MAX_TOKENS, strong = false } = {}) {
     const route = await pickModel(strong)
     const info = await ctx.llm.resolveModelInfo?.(route.provider, route.model).catch(() => undefined)
     const efforts = info?.reasoning?.efforts ?? []
     const effort = efforts.some((e) => e.id === 'off') ? 'off' : efforts.at(0)?.id
-    let text = '', finish
-    const kinds = {}
-    for await (const chunk of ctx.llm.stream({
-      provider: route.provider,
-      model: route.model,
-      ...(effort === undefined ? {} : { reasoningEffort: effort }),
-      system,
-      messages: [{ role: 'user', content: [{ type: 'text', text: user }] }],
-      maxTokens,
-      signal,
-    })) {
-      const kind = String(chunk?.type || '?')
-      kinds[kind] = (kinds[kind] || 0) + 1
-      if (kind === 'finish') { finish = chunk.reason; continue }
-      // 不同 host 版本对增量文本的字段名不完全一致，几种常见形状都接一下，别因为读错字段就当模型没说话
-      const piece = chunk?.text ?? chunk?.delta ?? chunk?.content?.text ?? chunk?.value ?? (typeof chunk?.delta === 'string' ? chunk.delta : undefined)
-      if (kind !== 'reasoning-delta' && typeof piece === 'string' && piece) text += piece
+    // 模型自己声明了输出上限就按它压一下，别拿 128K 去撞 400
+    const declared = Number(info?.limits?.maxOutputTokens || info?.maxOutputTokens || 0)
+    let budget = declared > 0 ? Math.min(maxTokens, declared) : maxTokens
+    let lastErr = null
+    for (let round = 0; round < 3; round++) {
+      let text = '', finish
+      const kinds = {}
+      try {
+        for await (const chunk of ctx.llm.stream({
+          provider: route.provider,
+          model: route.model,
+          ...(effort === undefined ? {} : { reasoningEffort: effort }),
+          system,
+          messages: [{ role: 'user', content: [{ type: 'text', text: user }] }],
+          maxTokens: budget,
+          signal,
+        })) {
+          const kind = String(chunk?.type || '?')
+          kinds[kind] = (kinds[kind] || 0) + 1
+          if (kind === 'finish') { finish = chunk.reason; continue }
+          // 不同 host 版本对增量文本的字段名不完全一致，几种常见形状都接一下，别因为读错字段就当模型没说话
+          const piece = chunk?.text ?? chunk?.delta ?? chunk?.content?.text ?? chunk?.value ?? (typeof chunk?.delta === 'string' ? chunk.delta : undefined)
+          if (kind !== 'reasoning-delta' && typeof piece === 'string' && piece) text += piece
+        }
+      } catch (e) {
+        const msg = String(e?.message || e)
+        // 上限给太大被闸掉的（400 / 参数非法），降一档再来，别把整次排程一起废掉
+        if (budget > 4096 && /max.?tokens?|too (large|long)|invalid|400|exceed/i.test(msg)) {
+          budget = Math.max(4096, Math.floor(budget / 4))
+          lastErr = e
+          continue
+        }
+        throw e
+      }
+      if (finish && (finish.kind === 'error' || finish.kind === 'aborted')) {
+        const msg = finish.failure?.message || '模型调用失败'
+        if (budget > 4096 && /max.?tokens?|too (large|long)|invalid|exceed/i.test(msg)) {
+          budget = Math.max(4096, Math.floor(budget / 4))
+          lastErr = new Error(msg)
+          continue
+        }
+        if (/max.?token|length/i.test(msg)) throw new Error('这次事情太多，一次排不下，分两段说试试')
+        throw new Error(msg)
+      }
+      return { text, model: route.model, kinds, budget }
     }
-    if (finish && (finish.kind === 'error' || finish.kind === 'aborted')) {
-      const msg = finish.failure?.message || '模型调用失败'
-      if (/max.?token|length/i.test(msg)) throw new Error('这次事情太多，一次排不下，分两段说试试')
-      throw new Error(msg)
-    }
-    return { text, model: route.model, kinds }
+    throw lastErr || new Error('模型调用失败')
   }
 }
 
@@ -912,7 +939,7 @@ export function apply(ctx) {
     }
 
     if (body.endpoint === 'parse') {
-      const r = await ask(PARSE_SYSTEM, parsePrompt(p), { signal, maxTokens: 1600 })
+      const r = await ask(PARSE_SYSTEM, parsePrompt(p), { signal, maxTokens: AI_MAX_TOKENS })
       return { ok: true, model: r.model, result: extractJSON(r.text) }
     }
 
@@ -923,7 +950,7 @@ export function apply(ctx) {
       // 就换快模型再排一次——排程这事不能因为模型脾气就停在「还没排出来」。
       let last = { plan: null, model: '', text: '', err: '', kinds: {} }
       for (const strong of [true, false]) {
-        const r = await ask(PLAN_SYSTEM, prompt, { signal, maxTokens: 2400, strong })
+        const r = await ask(PLAN_SYSTEM, prompt, { signal, maxTokens: AI_MAX_TOKENS, strong })
         try {
           const plan = tidyPlan(extractJSON(r.text), dateStr, p.busy)
           if (plan.blocks.length) return { ok: true, model: r.model, result: plan }
@@ -944,7 +971,7 @@ export function apply(ctx) {
     }
 
     if (body.endpoint === 'coach') {
-      const r = await ask(COACH_SYSTEM, coachPrompt(p), { signal, maxTokens: 400 })
+      const r = await ask(COACH_SYSTEM, coachPrompt(p), { signal, maxTokens: AI_MAX_TOKENS })
       const j = extractJSON(r.text)
       return { ok: true, model: r.model, result: { lines: (j.lines || []).filter((x) => typeof x === 'string').slice(0, 2) } }
     }
@@ -1106,7 +1133,9 @@ export function apply(ctx) {
     fetch: async (request) => {
       let body = {}
       try { body = await request.json() } catch {}
-      const timeout = AbortSignal.timeout(AI_TIMEOUT_MS)
+      // 排程要吐一整天的块，给它更长的等待时间；其它接口还是 45 秒
+      const isPlan = body && (body.endpoint === 'plan' || body.endpoint === 'replan')
+      const timeout = AbortSignal.timeout(isPlan ? PLAN_TIMEOUT_MS : AI_TIMEOUT_MS)
       const signal = request.signal && AbortSignal.any ? AbortSignal.any([request.signal, timeout]) : timeout
       try {
         return json(await api(body, signal))

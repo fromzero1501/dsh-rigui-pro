@@ -39,6 +39,7 @@ const CSS = `
 .rp-btn.main:disabled{opacity:.45;cursor:default}
 .rp-empty{padding:34px 0;text-align:center;color:var(--ink2,#6B7280);font-size:14px;line-height:1.8}
 .rp-load{display:flex;flex-direction:column;gap:10px;padding:20px 0}
+.rp-wait{margin-top:2px;font-size:13px;color:var(--ink2,#6B7280);text-align:left}
 .rp-skel{height:16px;border-radius:8px;background:var(--rule,rgba(31,35,40,.08));animation:rp-pulse 1.2s ease-in-out infinite}
 @keyframes rp-pulse{0%,100%{opacity:.5}50%{opacity:1}}
 `
@@ -55,7 +56,16 @@ const Tick = (
 export default function PlanPanel({ open, draft, date, busy, error, onClose, onAccept, onReplan }) {
   const [off, setOff] = useState({})
   const [ask, setAsk] = useState('')
+  const [secs, setSecs] = useState(0)
   const inputRef = useRef(null)
+
+  // 排一次要等模型想，给它一个跳秒的计时，别让人以为卡死了
+  useEffect(() => {
+    if (!busy) { setSecs(0); return undefined }
+    const t0 = Date.now()
+    const id = setInterval(() => setSecs(Math.round((Date.now() - t0) / 1000)), 500)
+    return () => clearInterval(id)
+  }, [busy])
 
   useEffect(() => { if (open) { setOff({}); setAsk('') } }, [open, draft && draft.date, draft && draft.summary])
   useEffect(() => {
@@ -93,6 +103,7 @@ export default function PlanPanel({ open, draft, date, busy, error, onClose, onA
               <span className="rp-skel" style={{ width: '54%' }} />
               <span className="rp-skel" style={{ width: '64%' }} />
               <span className="rp-skel" style={{ width: '44%' }} />
+              <div className="rp-wait">{secs >= 8 ? `模型在想，已经 ${secs} 秒了，最多等 3 分钟。` : '先看你的日程和习惯，再动手排。'}</div>
             </div>
           ) : error ? (
             <div className="rp-empty">{error}<br />可以改一句要求再排一次。</div>

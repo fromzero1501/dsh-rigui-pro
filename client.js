@@ -4713,6 +4713,7 @@ var CSS2 = `
 .rp-btn.main:disabled{opacity:.45;cursor:default}
 .rp-empty{padding:34px 0;text-align:center;color:var(--ink2,#6B7280);font-size:14px;line-height:1.8}
 .rp-load{display:flex;flex-direction:column;gap:10px;padding:20px 0}
+.rp-wait{margin-top:2px;font-size:13px;color:var(--ink2,#6B7280);text-align:left}
 .rp-skel{height:16px;border-radius:8px;background:var(--rule,rgba(31,35,40,.08));animation:rp-pulse 1.2s ease-in-out infinite}
 @keyframes rp-pulse{0%,100%{opacity:.5}50%{opacity:1}}
 `;
@@ -4722,7 +4723,17 @@ var Tick = /* @__PURE__ */ import_react8.default.createElement("svg", { width: "
 function PlanPanel({ open, draft, date, busy, error, onClose, onAccept, onReplan }) {
   const [off, setOff] = (0, import_react8.useState)({});
   const [ask, setAsk] = (0, import_react8.useState)("");
+  const [secs, setSecs] = (0, import_react8.useState)(0);
   const inputRef = (0, import_react8.useRef)(null);
+  (0, import_react8.useEffect)(() => {
+    if (!busy) {
+      setSecs(0);
+      return void 0;
+    }
+    const t0 = Date.now();
+    const id = setInterval(() => setSecs(Math.round((Date.now() - t0) / 1e3)), 500);
+    return () => clearInterval(id);
+  }, [busy]);
   (0, import_react8.useEffect)(() => {
     if (open) {
       setOff({});
@@ -4749,7 +4760,7 @@ function PlanPanel({ open, draft, date, busy, error, onClose, onAccept, onReplan
     if (busy || !kept.length) return;
     onAccept(kept);
   };
-  return /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("style", null, CSS2), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-scrim", onClick: onClose, "aria-hidden": "true" }), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-wrap", role: "dialog", "aria-modal": "true", "aria-label": "今天的安排" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-head" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-title" }, date ? date.slice(5).replace("-", " 月 ") + " 日" : "今天", "的安排", /* @__PURE__ */ import_react8.default.createElement("small", null, busy ? "正在排…" : blocks.length ? `排了 ${blocks.length} 件事，不想要的点掉` : "")), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-sum" }, draft && draft.summary ? draft.summary : busy ? "先看你的日程和习惯，再动手排。" : "还没排出来。")), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-body" }, busy && !blocks.length ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-load" }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "72%" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "54%" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "64%" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "44%" } })) : error ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-empty" }, error, /* @__PURE__ */ import_react8.default.createElement("br", null), "可以改一句要求再排一次。") : !blocks.length ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-empty" }, "这一天没有必须排进去的事。", /* @__PURE__ */ import_react8.default.createElement("br", null), "你可以说「上午写脚本、下午寄快递」，我再来排。") : /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, blocks.map((b, i) => /* @__PURE__ */ import_react8.default.createElement(
+  return /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, /* @__PURE__ */ import_react8.default.createElement("style", null, CSS2), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-scrim", onClick: onClose, "aria-hidden": "true" }), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-wrap", role: "dialog", "aria-modal": "true", "aria-label": "今天的安排" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-head" }, /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-title" }, date ? date.slice(5).replace("-", " 月 ") + " 日" : "今天", "的安排", /* @__PURE__ */ import_react8.default.createElement("small", null, busy ? "正在排…" : blocks.length ? `排了 ${blocks.length} 件事，不想要的点掉` : "")), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-sum" }, draft && draft.summary ? draft.summary : busy ? "先看你的日程和习惯，再动手排。" : "还没排出来。")), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-body" }, busy && !blocks.length ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-load" }, /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "72%" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "54%" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "64%" } }), /* @__PURE__ */ import_react8.default.createElement("span", { className: "rp-skel", style: { width: "44%" } }), /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-wait" }, secs >= 8 ? `模型在想，已经 ${secs} 秒了，最多等 3 分钟。` : "先看你的日程和习惯，再动手排。")) : error ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-empty" }, error, /* @__PURE__ */ import_react8.default.createElement("br", null), "可以改一句要求再排一次。") : !blocks.length ? /* @__PURE__ */ import_react8.default.createElement("div", { className: "rp-empty" }, "这一天没有必须排进去的事。", /* @__PURE__ */ import_react8.default.createElement("br", null), "你可以说「上午写脚本、下午寄快递」，我再来排。") : /* @__PURE__ */ import_react8.default.createElement(import_react8.default.Fragment, null, blocks.map((b, i) => /* @__PURE__ */ import_react8.default.createElement(
     "div",
     {
       key: i,
