@@ -122,8 +122,11 @@ export function parse(input, now = Date.now(), mine = {}) {
   const mark = (str, domain) => { if (str && text.includes(str)) out.tokens.push({ text: str, domain }) }
 
   const past = pastDay(text, now)
-  const dayShift = /明天/.test(text) ? 1 : /后天/.test(text) ? 2 : past ? Math.round((past.day - startOfDay(now)) / DAY) : 0
-  if (dayShift > 0) mark(text.match(/明天|后天/)[0], 'time')
+  // 凌晨 0–4 点还没睡，这时候说「明天」指的是当天（28 号 1 点说「明天九点起」= 28 号 9 点）
+  const early = new Date(now).getHours() < 4
+  const dayShift = /明天/.test(text) ? (early ? 0 : 1) : /后天/.test(text) ? (early ? 1 : 2) : past ? Math.round((past.day - startOfDay(now)) / DAY) : 0
+  const dayWord = text.match(/明天|后天/)
+  if (dayWord) mark(dayWord[0], 'time')
   if (past) mark(past.str, 'time')
   const base = startOfDay(now) + dayShift * DAY
   const clock = text.match(/(\d{1,2})[:：点](\d{2})?(?:分)?/)
