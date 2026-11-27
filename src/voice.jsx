@@ -4,6 +4,17 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { routineName } from './habits.js'
 
+// 上次出错的时间戳 -> 「11-28 00:34」；今天发生的只显示钟点，免得看成一串数字
+function errWhen(ts) {
+  const t = Number(ts) || 0
+  if (!t) return ''
+  const d = new Date(t)
+  const p = (n) => String(n).padStart(2, '0')
+  const hm = p(d.getHours()) + ':' + p(d.getMinutes())
+  const sameDay = new Date().toDateString() === d.toDateString()
+  return sameDay ? hm : p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + hm
+}
+
 const CSS = `
 .rv-scrim{position:fixed;inset:0;z-index:60;background:rgba(16,20,24,.42);backdrop-filter:blur(3px);animation:rv-fade .18s ease both}
 .rv-wrap{position:fixed;z-index:61;left:50%;top:50%;transform:translate(-50%,-50%);width:min(620px,calc(100vw - 40px));max-height:min(86vh,820px);display:flex;flex-direction:column;
@@ -200,7 +211,12 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
 
           {msg ? <div className="rv-warn">{msg}</div> : null}
           {!ready ? <div className="rv-warn">{provider === 'local' ? '还差服务地址。' : '还差地址或密钥，现在点了也念不出来。'}</div> : null}
-          {v.lastError ? <div className="rv-warn">上次出错：{v.lastError}</div> : null}
+          {v.lastError ? (
+            <div className="rv-warn">
+              上次出错{errWhen(v.lastErrorAt) ? '（' + errWhen(v.lastErrorAt) + '）' : ''}：{v.lastError}
+              <span className="rv-note" style={{ display: 'block', margin: '6px 0 0' }}>改了配置再保存，这条会清掉；点「念一句试试」成功也会清掉。</span>
+            </div>
+          ) : null}
           <p className="rv-note">
             播放器：{v.ffplay ? 'ffplay 可用' : '没找到 ffplay（非 wav 播不了）'} · 缓存 {v.cache ? v.cache.count : 0} 条 · 深夜 23:30–07:30 不念，只弹提醒。
           </p>

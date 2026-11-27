@@ -194,6 +194,7 @@ function voiceDefaults() {
     local: { shape: 'gradio', baseUrl: 'http://127.0.0.1:7860', apiName: 'gen_single', voicePath: '', format: 'wav', payload: '' },
     lastAt: 0,
     lastError: '',
+    lastErrorAt: 0,
   }
 }
 
@@ -437,6 +438,13 @@ function startPlay(file) {
     return
   }
   throw new Error('没找到 ffplay：装个 ffmpeg，或者把 ffplay 放进 PATH')
+}
+
+// 记一条失败：带上发生时间，界面上好判断这是不是刚才那次
+function markVoiceError(v, e, at) {
+  v.lastError = String((e && e.message) || e).slice(0, 200)
+  v.lastErrorAt = +at || Date.now()
+  return v
 }
 
 async function speakNow(v, text) {
@@ -737,7 +745,7 @@ export function apply(ctx) {
               ? phraseFor(store, last.kind, now)
               : String(last.title || '').slice(0, 60) + '，' + phraseFor(store, grp, now)
             speakNow(v, said).catch((e) => {
-              v.lastError = String((e && e.message) || e).slice(0, 200)
+              markVoiceError(v, e, Date.now())
               store.voice = v
               save()
             })
@@ -899,6 +907,9 @@ export function apply(ctx) {
       if (action === 'get') return { ok: true, result: { voice: v, ffplay: !!ffplayPath(), cache: cacheStat(), playing: !!playing } }
       if (action === 'set') {
         const next = mergeVoice(v, p.voice)
+        // 换了配置就把上一次的错误清掉：那条多半是对着旧配置报的，留着只会让人以为还没修好
+        next.lastError = ''
+        next.lastErrorAt = 0
         store.voice = next
         save()
         return { ok: true, result: { voice: next, ffplay: !!ffplayPath(), cache: cacheStat() } }
@@ -910,14 +921,15 @@ export function apply(ctx) {
           const r = await speakNow(v, text)
           v.lastAt = now
           v.lastError = ''
+          v.lastErrorAt = 0
           store.voice = v
           save()
           return { ok: true, result: { played: true, text: r.text, cached: r.cached, file: r.file } }
         } catch (e) {
-          v.lastError = String((e && e.message) || e).slice(0, 200)
+          markVoiceError(v, e, now)
           store.voice = v
           save()
-          return { ok: false, error: v.lastError }
+          return { ok: false, error: v.lastError, errorAt: v.lastErrorAt }
         }
       }
       if (action === 'stop') {
