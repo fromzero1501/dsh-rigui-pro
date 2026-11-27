@@ -612,6 +612,12 @@ export default function LifeApp() {
       return j
     } catch { return null }
   }
+  // 下拉里只放模型短名（去掉 provider 前缀），不然这一行会被撑得很宽
+  const shortModelName = (pv, m) => {
+    const name = String((m && (m.name || m.id)) || '')
+    const pre = String((pv && (pv.name || pv.id)) || '')
+    return pre && name.startsWith(pre + ' ') ? name.slice(pre.length + 1) : name
+  }
   // 小喇叭：亮着就念；点一下先听，再点一下就这件事不念
   const sayRoutine = (kind) => {
     if (!voice) { runVoice({ action: 'say', kind }); return }
@@ -1155,7 +1161,8 @@ export default function LifeApp() {
                 </button>
                 <select
                   aria-label="用哪个模型"
-                  data-tip="解析和排程都用它；选「自动」就跟着 DSH 当前选的模型走"
+                  data-tip={aiPick.model ? '当前指定：' + aiPick.model : '解析和排程都用它；选「自动」就跟着 DSH 当前选的模型走'}
+                  title={aiPick.model || '自动'}
                   value={aiPick.model ? aiPick.provider + '::' + aiPick.model : ''}
                   onChange={(e) => {
                     const v = e.target.value
@@ -1165,7 +1172,7 @@ export default function LifeApp() {
                     setAiPick({ provider, model })
                     runAIChoice({ action: 'set', provider, model })
                   }}
-                  style={{ maxWidth: 210, height: 34, padding: '0 10px', borderRadius: 999, border: '1px solid rgba(0,0,0,.12)', background: 'rgba(255,255,255,.92)', color: '#1a1a1a', fontSize: 12.5, cursor: 'pointer' }}
+                  style={{ flex: 'none', marginLeft: 'auto', width: 116, height: 30, padding: '0 4px 0 9px', borderRadius: 999, border: '1px solid rgba(0,0,0,.12)', background: 'rgba(255,255,255,.92)', color: '#1a1a1a', fontSize: 12, cursor: 'pointer', textOverflow: 'ellipsis' }}
                 >
                   <option value="">模型：自动</option>
                   {aiPick.model && !aiList.providers.some((pv) => pv.id === aiPick.provider && pv.models.some((m) => m.id === aiPick.model)) ? (
@@ -1174,7 +1181,7 @@ export default function LifeApp() {
                   {aiList.providers.map((pv) => (
                     <optgroup key={pv.id} label={pv.name}>
                       {pv.models.map((m) => (
-                        <option key={pv.id + '::' + m.id} value={pv.id + '::' + m.id}>{m.name}</option>
+                        <option key={pv.id + '::' + m.id} value={pv.id + '::' + m.id}>{shortModelName(pv, m)}</option>
                       ))}
                     </optgroup>
                   ))}

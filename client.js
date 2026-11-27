@@ -5837,6 +5837,11 @@ function LifeApp() {
       return null;
     }
   };
+  const shortModelName = (pv, m) => {
+    const name = String(m && (m.name || m.id) || "");
+    const pre = String(pv && (pv.name || pv.id) || "");
+    return pre && name.startsWith(pre + " ") ? name.slice(pre.length + 1) : name;
+  };
   const sayRoutine = (kind) => {
     if (!voice) {
       runVoice({ action: "say", kind });
@@ -6527,7 +6532,8 @@ function LifeApp() {
     "select",
     {
       "aria-label": "用哪个模型",
-      "data-tip": "解析和排程都用它；选「自动」就跟着 DSH 当前选的模型走",
+      "data-tip": aiPick.model ? "当前指定：" + aiPick.model : "解析和排程都用它；选「自动」就跟着 DSH 当前选的模型走",
+      title: aiPick.model || "自动",
       value: aiPick.model ? aiPick.provider + "::" + aiPick.model : "",
       onChange: (e) => {
         const v = e.target.value;
@@ -6537,11 +6543,11 @@ function LifeApp() {
         setAiPick({ provider, model });
         runAIChoice({ action: "set", provider, model });
       },
-      style: { maxWidth: 210, height: 34, padding: "0 10px", borderRadius: 999, border: "1px solid rgba(0,0,0,.12)", background: "rgba(255,255,255,.92)", color: "#1a1a1a", fontSize: 12.5, cursor: "pointer" }
+      style: { flex: "none", marginLeft: "auto", width: 116, height: 30, padding: "0 4px 0 9px", borderRadius: 999, border: "1px solid rgba(0,0,0,.12)", background: "rgba(255,255,255,.92)", color: "#1a1a1a", fontSize: 12, cursor: "pointer", textOverflow: "ellipsis" }
     },
     /* @__PURE__ */ import_react11.default.createElement("option", { value: "" }, "模型：自动"),
     aiPick.model && !aiList.providers.some((pv) => pv.id === aiPick.provider && pv.models.some((m) => m.id === aiPick.model)) ? /* @__PURE__ */ import_react11.default.createElement("option", { value: aiPick.provider + "::" + aiPick.model }, aiPick.model) : null,
-    aiList.providers.map((pv) => /* @__PURE__ */ import_react11.default.createElement("optgroup", { key: pv.id, label: pv.name }, pv.models.map((m) => /* @__PURE__ */ import_react11.default.createElement("option", { key: pv.id + "::" + m.id, value: pv.id + "::" + m.id }, m.name))))
+    aiList.providers.map((pv) => /* @__PURE__ */ import_react11.default.createElement("optgroup", { key: pv.id, label: pv.name }, pv.models.map((m) => /* @__PURE__ */ import_react11.default.createElement("option", { key: pv.id + "::" + m.id, value: pv.id + "::" + m.id }, shortModelName(pv, m)))))
   )), /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-below", style: { display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: 10, minHeight: 100, marginTop: -12 } }, text.trim() && !settled ? /* @__PURE__ */ import_react11.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.45)", minHeight: 20 } }, "说完停一下，我来理解这句话") : text.trim() ? /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, opacity: typing ? 0.4 : 1, transition: "opacity .25s" } }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { gap: 10, fontSize: 13, color: "rgba(244,245,241,.55)", minHeight: 20 } }, typing ? /* @__PURE__ */ import_react11.default.createElement("span", null, "输入中，停一下就重新识别") : /* @__PURE__ */ import_react11.default.createElement(AiBadge, { status: aiFor, model: ai.model, error: ai.error }), !typing && aiFor !== "loading" && preview.records.length > 0 && /* @__PURE__ */ import_react11.default.createElement("span", null, "· 会影响 ", armedCards.size, " 张卡")), aiFor === "loading" ? /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-skel", style: { width: "62%" } }), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-skel", style: { width: "40%" } })) : preview.records.length > 0 ? /* @__PURE__ */ import_react11.default.createElement(import_react11.default.Fragment, null, /* @__PURE__ */ import_react11.default.createElement("div", { style: { fontSize: 15, lineHeight: 1.7 } }, highlight(settled, preview.tokens)), /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, preview.records.map((r) => r.type === "meal" && r.items ? /* @__PURE__ */ import_react11.default.createElement("div", { key: r.id, className: "lf-row", style: { flexWrap: "wrap", gap: 6 } }, /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-chip", style: { background: "rgba(242,153,74,.18)", color: "#F8C08B" } }, /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-dot", style: { background: C2.food } }), MEAL_NAME[r.meal], " · 共 ", r.kcal, " 千卡"), r.items.map((it, k) => /* @__PURE__ */ import_react11.default.createElement("label", { key: k, className: "lf-chip", style: { background: "rgba(255,255,255,.08)", gap: 6, paddingRight: 6 }, title: "热量不对就改，下次会记住" }, /* @__PURE__ */ import_react11.default.createElement("span", null, it.name, it.qty !== 1 ? " ×" + it.qty : ""), /* @__PURE__ */ import_react11.default.createElement(
     "input",
     {
