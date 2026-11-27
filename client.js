@@ -962,7 +962,8 @@ var DOMAIN = {
   food: { name: "饮食", color: "#F2994A", soft: "color-mix(in srgb,#F2994A 15%,var(--card))" },
   money: { name: "花销", color: "#7C5CE0", soft: "color-mix(in srgb,#7C5CE0 15%,var(--card))" },
   time: { name: "日程", color: "#1F2328", soft: "var(--fill)" },
-  body: { name: "身体", color: "#0E8A8A", soft: "color-mix(in srgb,#0E8A8A 15%,var(--card))" }
+  body: { name: "身体", color: "#0E8A8A", soft: "color-mix(in srgb,#0E8A8A 15%,var(--card))" },
+  routine: { name: "日常", color: "#3B82C4", soft: "color-mix(in srgb,#3B82C4 15%,var(--card))" }
 };
 var DEFAULT_GOALS = { kcal: 1800, budget: 7e3, sleep: 7.5, workoutsPerWeek: 4, weight: null };
 var GOALS = { ...DEFAULT_GOALS };
@@ -4980,6 +4981,9 @@ var CSS4 = `
 .rh-chip:hover{background:rgba(31,35,40,.05)}
 .rh-chip:active{transform:scale(.97)}
 .rh-chip.done{border-color:transparent;background:rgba(30,158,106,.14)}
+.rh-chip.locked{cursor:default;opacity:.7}
+.rh-chip.locked:hover{background:rgba(30,158,106,.14)}
+.rh-chip[disabled]{pointer-events:none}
 .rh-chip i{width:8px;height:8px;border-radius:50%;display:block}
 .rh-chip b{font-weight:600;font-variant-numeric:tabular-nums}
 .rh-say{width:27px;height:27px;flex:none;border-radius:9px;border:1px solid var(--rule,rgba(31,35,40,.12));background:transparent;color:inherit;font:inherit;font-size:12px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:background .12s ease,opacity .12s ease}
@@ -5017,9 +5021,20 @@ var CSS4 = `
 .rh-toast .a button.main{background:#F2994A;color:#1F2328;font-weight:600}
 `;
 var drop = (color, size = 8) => /* @__PURE__ */ import_react10.default.createElement("i", { style: { background: color }, "aria-hidden": "true" });
-function Chip({ kind, voice, onSay, onLog, done, title, children }) {
+function Chip({ kind, voice, onSay, onLog, done, locked, title, children }) {
   const on = !(voice && voice.read && voice.read[kind] === false);
-  return /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-item" }, /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-chip" + (done ? " done" : ""), onClick: () => onLog(kind), title }, children), /* @__PURE__ */ import_react10.default.createElement(
+  return /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-item" }, /* @__PURE__ */ import_react10.default.createElement(
+    "button",
+    {
+      type: "button",
+      className: "rh-chip" + (done ? " done" : "") + (locked ? " locked" : ""),
+      onClick: () => onLog(kind),
+      disabled: !!locked,
+      "aria-disabled": !!locked,
+      title: locked ? title + "（今天已经记过了）" : title
+    },
+    children
+  ), /* @__PURE__ */ import_react10.default.createElement(
     "button",
     {
       type: "button",
@@ -5046,7 +5061,9 @@ function RoutineCard({ ctx }) {
   const filled = Math.min(cups, Math.round(water.ml / 250) || water.count);
   const soon = (0, import_react10.useMemo)(() => (next || []).filter((n) => n.at > S2.now).sort((a, b) => a.at - b.at)[0], [next, S2.now]);
   const hairRule = (rules || []).find((r) => r.id === "hair");
-  return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 2 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "日常"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, water.ml ? water.ml + " ml" : water.count ? water.count + " 次" : "还没记")), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-cups", "aria-hidden": "true" }, Array.from({ length: cups }, (_, i) => /* @__PURE__ */ import_react10.default.createElement("span", { key: i, className: "rh-cup" + (i < filled ? " on" : ""), style: { height: 12 + i * 4 } }))), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-chips" }, /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "water", voice, onSay, onLog, done: !!water.count, title: "记一杯水" }, drop("#3B82C4"), "喝水 ", water.count ? /* @__PURE__ */ import_react10.default.createElement("b", null, water.count, " 次") : null), /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "shower", voice, onSay, onLog, done: !!shower, title: "记一次洗澡" }, drop("#3D4FB8"), "洗澡"), /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "hair", voice, onSay, onLog, done: hairDays != null && hairRule && hairDays < (hairRule.minGapDays || 3), title: "记一次洗头" }, drop("#7C5CE0"), "洗头", hairDays != null ? /* @__PURE__ */ import_react10.default.createElement("b", null, hairDays, " 天前") : null)), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-line" }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-next" }, soon ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-dot" }), fmtHM2(soon.at), " ", soon.title) : /* @__PURE__ */ import_react10.default.createElement("span", null, "今天的都过了")), water.lastAt ? /* @__PURE__ */ import_react10.default.createElement("span", null, fmtHM2(water.lastAt), " 喝过") : null), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-foot" }, /* @__PURE__ */ import_react10.default.createElement("p", { className: "rh-note" }, "喇叭亮着就会念；点一下先听，再点一下这件事就不念。")));
+  const waterFull = water.ml >= 2e3 || water.count >= 8;
+  const hairToday = hairDays === 0;
+  return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 2 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "日常"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, water.ml ? water.ml + " ml" : water.count ? water.count + " 次" : "还没记")), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-cups", "aria-hidden": "true" }, Array.from({ length: cups }, (_, i) => /* @__PURE__ */ import_react10.default.createElement("span", { key: i, className: "rh-cup" + (i < filled ? " on" : ""), style: { height: 12 + i * 4 } }))), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-chips" }, /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "water", voice, onSay, onLog, done: !!water.count, locked: waterFull, title: "记一杯水" }, drop("#3B82C4"), "喝水 ", water.count ? /* @__PURE__ */ import_react10.default.createElement("b", null, water.count, " 次") : null), /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "shower", voice, onSay, onLog, done: !!shower, locked: !!shower, title: "记一次洗澡" }, drop("#3D4FB8"), "洗澡"), /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "hair", voice, onSay, onLog, done: hairDays != null && hairRule && hairDays < (hairRule.minGapDays || 3), locked: hairToday, title: "记一次洗头" }, drop("#7C5CE0"), "洗头", hairDays != null ? /* @__PURE__ */ import_react10.default.createElement("b", null, hairDays, " 天前") : null)), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-line" }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-next" }, soon ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-dot" }), fmtHM2(soon.at), " ", soon.title) : /* @__PURE__ */ import_react10.default.createElement("span", null, "今天的都过了")), water.lastAt ? /* @__PURE__ */ import_react10.default.createElement("span", null, fmtHM2(water.lastAt), " 喝过") : null), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-foot" }, /* @__PURE__ */ import_react10.default.createElement("p", { className: "rh-note" }, "喇叭亮着就会念；点一下先听，再点一下这件事就不念。今天记过的按钮会灰掉。")));
 }
 function BackRoutine({ rules, onToggle, onEvery, onGap }) {
   return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h", style: { marginBottom: 8 } }, "提醒怎么设"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-rules" }, (rules || []).map((r) => /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-rule", key: r.id }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "n" }, r.title), r.mode === "interval" ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 4 } }, /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onEvery(r.id, -15), "aria-label": "少十五分钟" }, "−"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "t" }, r.everyMin, " 分钟"), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onEvery(r.id, 15), "aria-label": "多十五分钟" }, "+")) : r.mode === "gap" ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 4 } }, /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onGap(r.id, -1), "aria-label": "少一天" }, "−"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "t" }, r.minGapDays, " 天"), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onGap(r.id, 1), "aria-label": "多一天" }, "+")) : /* @__PURE__ */ import_react10.default.createElement("span", { className: "t" }, (r.times || []).join(" · ")), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-sw" + (r.enabled !== false ? " on" : ""), onClick: () => onToggle(r.id), "aria-label": r.enabled !== false ? "关掉" : "打开", "aria-pressed": r.enabled !== false })))), /* @__PURE__ */ import_react10.default.createElement("p", { className: "rh-note" }, "点一下就记下，记完自动顺延；面板关着也会弹系统提醒。待办和日程到点同样会提醒。"));

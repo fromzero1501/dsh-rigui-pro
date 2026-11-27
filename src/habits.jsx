@@ -12,6 +12,9 @@ const CSS = `
 .rh-chip:hover{background:rgba(31,35,40,.05)}
 .rh-chip:active{transform:scale(.97)}
 .rh-chip.done{border-color:transparent;background:rgba(30,158,106,.14)}
+.rh-chip.locked{cursor:default;opacity:.7}
+.rh-chip.locked:hover{background:rgba(30,158,106,.14)}
+.rh-chip[disabled]{pointer-events:none}
 .rh-chip i{width:8px;height:8px;border-radius:50%;display:block}
 .rh-chip b{font-weight:600;font-variant-numeric:tabular-nums}
 .rh-say{width:27px;height:27px;flex:none;border-radius:9px;border:1px solid var(--rule,rgba(31,35,40,.12));background:transparent;color:inherit;font:inherit;font-size:12px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:background .12s ease,opacity .12s ease}
@@ -52,11 +55,18 @@ const CSS = `
 const drop = (color, size = 8) => <i style={{ background: color }} aria-hidden="true" />
 
 // 一件事 + 旁边那个小喇叭（点一下：念这句，并把它设成要念）
-function Chip({ kind, voice, onSay, onLog, done, title, children }) {
+function Chip({ kind, voice, onSay, onLog, done, locked, title, children }) {
   const on = !(voice && voice.read && voice.read[kind] === false)
   return (
     <span className="rh-item">
-      <button type="button" className={'rh-chip' + (done ? ' done' : '')} onClick={() => onLog(kind)} title={title}>
+      <button
+        type="button"
+        className={'rh-chip' + (done ? ' done' : '') + (locked ? ' locked' : '')}
+        onClick={() => onLog(kind)}
+        disabled={!!locked}
+        aria-disabled={!!locked}
+        title={locked ? title + '（今天已经记过了）' : title}
+      >
         {children}
       </button>
       <button
@@ -81,6 +91,9 @@ export function RoutineCard({ ctx }) {
   const filled = Math.min(cups, Math.round(water.ml / 250) || water.count)
   const soon = useMemo(() => (next || []).filter((n) => n.at > S.now).sort((a, b) => a.at - b.at)[0], [next, S.now])
   const hairRule = (rules || []).find((r) => r.id === 'hair')
+  // 今天已经记过的就不再让点（洗澡洗头一天一次，喝水记满 8 杯就停）
+  const waterFull = water.ml >= 2000 || water.count >= 8
+  const hairToday = hairDays === 0
 
   return (
     <>
@@ -95,13 +108,13 @@ export function RoutineCard({ ctx }) {
         ))}
       </div>
       <div className="rh-chips">
-        <Chip kind="water" voice={voice} onSay={onSay} onLog={onLog} done={!!water.count} title="记一杯水">
+        <Chip kind="water" voice={voice} onSay={onSay} onLog={onLog} done={!!water.count} locked={waterFull} title="记一杯水">
           {drop('#3B82C4')}喝水 {water.count ? <b>{water.count} 次</b> : null}
         </Chip>
-        <Chip kind="shower" voice={voice} onSay={onSay} onLog={onLog} done={!!shower} title="记一次洗澡">
+        <Chip kind="shower" voice={voice} onSay={onSay} onLog={onLog} done={!!shower} locked={!!shower} title="记一次洗澡">
           {drop('#3D4FB8')}洗澡
         </Chip>
-        <Chip kind="hair" voice={voice} onSay={onSay} onLog={onLog} done={hairDays != null && hairRule && hairDays < (hairRule.minGapDays || 3)} title="记一次洗头">
+        <Chip kind="hair" voice={voice} onSay={onSay} onLog={onLog} done={hairDays != null && hairRule && hairDays < (hairRule.minGapDays || 3)} locked={hairToday} title="记一次洗头">
           {drop('#7C5CE0')}洗头{hairDays != null ? <b>{hairDays} 天前</b> : null}
         </Chip>
       </div>
@@ -112,7 +125,7 @@ export function RoutineCard({ ctx }) {
         {water.lastAt ? <span>{fmtHM(water.lastAt)} 喝过</span> : null}
       </div>
       <div className="rh-foot">
-        <p className="rh-note">喇叭亮着就会念；点一下先听，再点一下这件事就不念。</p>
+        <p className="rh-note">喇叭亮着就会念；点一下先听，再点一下这件事就不念。今天记过的按钮会灰掉。</p>
       </div>
     </>
   )

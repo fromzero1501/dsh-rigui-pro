@@ -7,6 +7,7 @@ export const DOMAIN = {
   money: { name: '花销', color: '#7C5CE0', soft: 'color-mix(in srgb,#7C5CE0 15%,var(--card))' },
   time: { name: '日程', color: '#1F2328', soft: 'var(--fill)' },
   body: { name: '身体', color: '#0E8A8A', soft: 'color-mix(in srgb,#0E8A8A 15%,var(--card))' },
+  routine: { name: '日常', color: '#3B82C4', soft: 'color-mix(in srgb,#3B82C4 15%,var(--card))' },
 }
 
 export const DEFAULT_GOALS = { kcal: 1800, budget: 7000, sleep: 7.5, workoutsPerWeek: 4, weight: null }
