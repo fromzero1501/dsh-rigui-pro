@@ -90,7 +90,7 @@ var TONE = {
   time: { a: "#1F2328", b: "#3A404A", name: "日程" }
 };
 async function api(endpoint, payload) {
-  const r = await fetch("api/rigui", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint, payload }) });
+  const r = await fetch("api/rigui-pro", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint, payload }) });
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || "failed");
   return j.result;

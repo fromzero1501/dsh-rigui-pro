@@ -38,7 +38,7 @@ export const TONE = {
 }
 
 async function api(endpoint, payload) {
-  const r = await fetch('api/rigui', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint, payload }) })
+  const r = await fetch('api/rigui-pro', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint, payload }) })
   const j = await r.json(); if (!j.ok) throw new Error(j.error || 'failed'); return j.result
 }
 const OM = 'https://api.open-meteo.com/v1/forecast?current=temperature_2m,apparent_temperature,weather_code,is_day,relative_humidity_2m,wind_speed_10m&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=7'
