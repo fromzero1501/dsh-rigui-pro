@@ -351,6 +351,8 @@ export default function LifeApp() {
   const [voiceMeta, setVoiceMeta] = useState({ ffplay: false, cache: null })
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [plan, setPlan] = useState({ open: false, busy: false, draft: null, error: '', date: '', text: '' })
+  const [aiList, setAiList] = useState({ providers: [], auto: { provider: '', model: '' } })
+  const [aiPick, setAiPick] = useState({ provider: '', model: '' })
   const rootRef = useRef(null), inputRef = useRef(null), refs = useRef({})
 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
@@ -579,6 +581,7 @@ export default function LifeApp() {
       setReminders(j.result.due || [])
       setReminderNext(j.result.next || [])
       if (j.result.voice) setVoice(j.result.voice)
+      if (j.result.ai) setAiPick({ provider: j.result.ai.provider || '', model: j.result.ai.model || '' })
     }
     return j
   }).catch(() => null), [])
@@ -599,6 +602,16 @@ export default function LifeApp() {
   }
   const voiceSet = (patch) => runVoice({ action: 'set', voice: patch })
   const voiceTest = () => runVoice({ action: 'test' })
+  // 用哪个模型：列出 DSH 里的模型让用户自己指定，空着就是自动
+  const runAIChoice = async (payload) => {
+    try {
+      const j = await callHost('ai', payload)
+      const r = (j && j.result) || {}
+      if (Array.isArray(r.providers)) setAiList({ providers: r.providers, auto: r.auto || { provider: '', model: '' } })
+      if (r.pick) setAiPick({ provider: r.pick.provider || '', model: r.pick.model || '' })
+      return j
+    } catch { return null }
+  }
   // 小喇叭：亮着就念；点一下先听，再点一下就这件事不念
   const sayRoutine = (kind) => {
     if (!voice) { runVoice({ action: 'say', kind }); return }
@@ -608,6 +621,8 @@ export default function LifeApp() {
   }
   // 打开就问一次：播放器在不在、缓存有多少
   useEffect(() => { runVoice({ action: 'get' }) }, [])
+  // 顺便把 DSH 里的模型清单取回来，填进顶部那个下拉
+  useEffect(() => { runAIChoice({ action: 'list' }) }, [])
 
   const logRoutine = useCallback((kind, amount) => {
     const t = Date.now()
@@ -1138,6 +1153,32 @@ export default function LifeApp() {
                   <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>🔊</span>
                   <span>语音</span>
                 </button>
+                <select
+                  aria-label="用哪个模型"
+                  data-tip="解析和排程都用它；选「自动」就跟着 DSH 当前选的模型走"
+                  value={aiPick.model ? aiPick.provider + '::' + aiPick.model : ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    const cut = v.indexOf('::')
+                    const provider = cut > 0 ? v.slice(0, cut) : ''
+                    const model = cut > 0 ? v.slice(cut + 2) : ''
+                    setAiPick({ provider, model })
+                    runAIChoice({ action: 'set', provider, model })
+                  }}
+                  style={{ maxWidth: 210, height: 34, padding: '0 10px', borderRadius: 999, border: '1px solid rgba(0,0,0,.12)', background: 'rgba(255,255,255,.92)', color: '#1a1a1a', fontSize: 12.5, cursor: 'pointer' }}
+                >
+                  <option value="">模型：自动</option>
+                  {aiPick.model && !aiList.providers.some((pv) => pv.id === aiPick.provider && pv.models.some((m) => m.id === aiPick.model)) ? (
+                    <option value={aiPick.provider + '::' + aiPick.model}>{aiPick.model}</option>
+                  ) : null}
+                  {aiList.providers.map((pv) => (
+                    <optgroup key={pv.id} label={pv.name}>
+                      {pv.models.map((m) => (
+                        <option key={pv.id + '::' + m.id} value={pv.id + '::' + m.id}>{m.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
                 </div>
                 <div className="lf-below" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 10, minHeight: 100, marginTop: -12 }}>
                   {text.trim() && !settled ? (

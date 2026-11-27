@@ -5500,6 +5500,8 @@ function LifeApp() {
   const [voiceMeta, setVoiceMeta] = (0, import_react11.useState)({ ffplay: false, cache: null });
   const [voiceOpen, setVoiceOpen] = (0, import_react11.useState)(false);
   const [plan, setPlan] = (0, import_react11.useState)({ open: false, busy: false, draft: null, error: "", date: "", text: "" });
+  const [aiList, setAiList] = (0, import_react11.useState)({ providers: [], auto: { provider: "", model: "" } });
+  const [aiPick, setAiPick] = (0, import_react11.useState)({ provider: "", model: "" });
   const rootRef = (0, import_react11.useRef)(null), inputRef = (0, import_react11.useRef)(null), refs = (0, import_react11.useRef)({});
   (0, import_react11.useEffect)(() => {
     const t = setInterval(() => setNow(Date.now()), 3e4);
@@ -5805,6 +5807,7 @@ function LifeApp() {
       setReminders(j.result.due || []);
       setReminderNext(j.result.next || []);
       if (j.result.voice) setVoice(j.result.voice);
+      if (j.result.ai) setAiPick({ provider: j.result.ai.provider || "", model: j.result.ai.model || "" });
     }
     return j;
   }).catch(() => null), []);
@@ -5823,6 +5826,17 @@ function LifeApp() {
   };
   const voiceSet = (patch) => runVoice({ action: "set", voice: patch });
   const voiceTest = () => runVoice({ action: "test" });
+  const runAIChoice = async (payload) => {
+    try {
+      const j = await callHost("ai", payload);
+      const r = j && j.result || {};
+      if (Array.isArray(r.providers)) setAiList({ providers: r.providers, auto: r.auto || { provider: "", model: "" } });
+      if (r.pick) setAiPick({ provider: r.pick.provider || "", model: r.pick.model || "" });
+      return j;
+    } catch {
+      return null;
+    }
+  };
   const sayRoutine = (kind) => {
     if (!voice) {
       runVoice({ action: "say", kind });
@@ -5839,6 +5853,9 @@ function LifeApp() {
   };
   (0, import_react11.useEffect)(() => {
     runVoice({ action: "get" });
+  }, []);
+  (0, import_react11.useEffect)(() => {
+    runAIChoice({ action: "list" });
   }, []);
   const logRoutine = (0, import_react11.useCallback)((kind, amount) => {
     const t = Date.now();
@@ -6506,7 +6523,26 @@ function LifeApp() {
         if (e.key === "Escape") setText("");
       }
     }
-  ), /* @__PURE__ */ import_react11.default.createElement("button", { type: "submit", className: "lf-send", disabled: !text.trim() || busy, "aria-label": "记下" }, busy ? /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-spin" }) : Icon.send)), /* @__PURE__ */ import_react11.default.createElement(GoalsButton, { goals, suggestions, onClick: openGoals }), /* @__PURE__ */ import_react11.default.createElement("button", { type: "button", className: "gl-entry", onClick: () => setVoiceOpen(true), "aria-label": "语音设置", "data-tip": "念不念、用哪个声音" }, /* @__PURE__ */ import_react11.default.createElement("span", { "aria-hidden": "true", style: { fontSize: 15, lineHeight: 1 } }, "🔊"), /* @__PURE__ */ import_react11.default.createElement("span", null, "语音"))), /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-below", style: { display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: 10, minHeight: 100, marginTop: -12 } }, text.trim() && !settled ? /* @__PURE__ */ import_react11.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.45)", minHeight: 20 } }, "说完停一下，我来理解这句话") : text.trim() ? /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, opacity: typing ? 0.4 : 1, transition: "opacity .25s" } }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { gap: 10, fontSize: 13, color: "rgba(244,245,241,.55)", minHeight: 20 } }, typing ? /* @__PURE__ */ import_react11.default.createElement("span", null, "输入中，停一下就重新识别") : /* @__PURE__ */ import_react11.default.createElement(AiBadge, { status: aiFor, model: ai.model, error: ai.error }), !typing && aiFor !== "loading" && preview.records.length > 0 && /* @__PURE__ */ import_react11.default.createElement("span", null, "· 会影响 ", armedCards.size, " 张卡")), aiFor === "loading" ? /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-skel", style: { width: "62%" } }), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-skel", style: { width: "40%" } })) : preview.records.length > 0 ? /* @__PURE__ */ import_react11.default.createElement(import_react11.default.Fragment, null, /* @__PURE__ */ import_react11.default.createElement("div", { style: { fontSize: 15, lineHeight: 1.7 } }, highlight(settled, preview.tokens)), /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, preview.records.map((r) => r.type === "meal" && r.items ? /* @__PURE__ */ import_react11.default.createElement("div", { key: r.id, className: "lf-row", style: { flexWrap: "wrap", gap: 6 } }, /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-chip", style: { background: "rgba(242,153,74,.18)", color: "#F8C08B" } }, /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-dot", style: { background: C2.food } }), MEAL_NAME[r.meal], " · 共 ", r.kcal, " 千卡"), r.items.map((it, k) => /* @__PURE__ */ import_react11.default.createElement("label", { key: k, className: "lf-chip", style: { background: "rgba(255,255,255,.08)", gap: 6, paddingRight: 6 }, title: "热量不对就改，下次会记住" }, /* @__PURE__ */ import_react11.default.createElement("span", null, it.name, it.qty !== 1 ? " ×" + it.qty : ""), /* @__PURE__ */ import_react11.default.createElement(
+  ), /* @__PURE__ */ import_react11.default.createElement("button", { type: "submit", className: "lf-send", disabled: !text.trim() || busy, "aria-label": "记下" }, busy ? /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-spin" }) : Icon.send)), /* @__PURE__ */ import_react11.default.createElement(GoalsButton, { goals, suggestions, onClick: openGoals }), /* @__PURE__ */ import_react11.default.createElement("button", { type: "button", className: "gl-entry", onClick: () => setVoiceOpen(true), "aria-label": "语音设置", "data-tip": "念不念、用哪个声音" }, /* @__PURE__ */ import_react11.default.createElement("span", { "aria-hidden": "true", style: { fontSize: 15, lineHeight: 1 } }, "🔊"), /* @__PURE__ */ import_react11.default.createElement("span", null, "语音")), /* @__PURE__ */ import_react11.default.createElement(
+    "select",
+    {
+      "aria-label": "用哪个模型",
+      "data-tip": "解析和排程都用它；选「自动」就跟着 DSH 当前选的模型走",
+      value: aiPick.model ? aiPick.provider + "::" + aiPick.model : "",
+      onChange: (e) => {
+        const v = e.target.value;
+        const cut = v.indexOf("::");
+        const provider = cut > 0 ? v.slice(0, cut) : "";
+        const model = cut > 0 ? v.slice(cut + 2) : "";
+        setAiPick({ provider, model });
+        runAIChoice({ action: "set", provider, model });
+      },
+      style: { maxWidth: 210, height: 34, padding: "0 10px", borderRadius: 999, border: "1px solid rgba(0,0,0,.12)", background: "rgba(255,255,255,.92)", color: "#1a1a1a", fontSize: 12.5, cursor: "pointer" }
+    },
+    /* @__PURE__ */ import_react11.default.createElement("option", { value: "" }, "模型：自动"),
+    aiPick.model && !aiList.providers.some((pv) => pv.id === aiPick.provider && pv.models.some((m) => m.id === aiPick.model)) ? /* @__PURE__ */ import_react11.default.createElement("option", { value: aiPick.provider + "::" + aiPick.model }, aiPick.model) : null,
+    aiList.providers.map((pv) => /* @__PURE__ */ import_react11.default.createElement("optgroup", { key: pv.id, label: pv.name }, pv.models.map((m) => /* @__PURE__ */ import_react11.default.createElement("option", { key: pv.id + "::" + m.id, value: pv.id + "::" + m.id }, m.name))))
+  )), /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-below", style: { display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: 10, minHeight: 100, marginTop: -12 } }, text.trim() && !settled ? /* @__PURE__ */ import_react11.default.createElement("span", { style: { fontSize: 13, color: "rgba(244,245,241,.45)", minHeight: 20 } }, "说完停一下，我来理解这句话") : text.trim() ? /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, opacity: typing ? 0.4 : 1, transition: "opacity .25s" } }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { gap: 10, fontSize: 13, color: "rgba(244,245,241,.55)", minHeight: 20 } }, typing ? /* @__PURE__ */ import_react11.default.createElement("span", null, "输入中，停一下就重新识别") : /* @__PURE__ */ import_react11.default.createElement(AiBadge, { status: aiFor, model: ai.model, error: ai.error }), !typing && aiFor !== "loading" && preview.records.length > 0 && /* @__PURE__ */ import_react11.default.createElement("span", null, "· 会影响 ", armedCards.size, " 张卡")), aiFor === "loading" ? /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-skel", style: { width: "62%" } }), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-skel", style: { width: "40%" } })) : preview.records.length > 0 ? /* @__PURE__ */ import_react11.default.createElement(import_react11.default.Fragment, null, /* @__PURE__ */ import_react11.default.createElement("div", { style: { fontSize: 15, lineHeight: 1.7 } }, highlight(settled, preview.tokens)), /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, preview.records.map((r) => r.type === "meal" && r.items ? /* @__PURE__ */ import_react11.default.createElement("div", { key: r.id, className: "lf-row", style: { flexWrap: "wrap", gap: 6 } }, /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-chip", style: { background: "rgba(242,153,74,.18)", color: "#F8C08B" } }, /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-dot", style: { background: C2.food } }), MEAL_NAME[r.meal], " · 共 ", r.kcal, " 千卡"), r.items.map((it, k) => /* @__PURE__ */ import_react11.default.createElement("label", { key: k, className: "lf-chip", style: { background: "rgba(255,255,255,.08)", gap: 6, paddingRight: 6 }, title: "热量不对就改，下次会记住" }, /* @__PURE__ */ import_react11.default.createElement("span", null, it.name, it.qty !== 1 ? " ×" + it.qty : ""), /* @__PURE__ */ import_react11.default.createElement(
     "input",
     {
       type: "number",

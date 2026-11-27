@@ -105,7 +105,7 @@ const DEFAULT_RULES = [
   { id: 'sleep', kind: 'sleep', title: '该睡了', mode: 'fixed', times: ['23:30'], enabled: true },
 ]
 
-const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], plans: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0, voice: voiceDefaults() })
+const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], plans: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0, ai: { provider: '', model: '' }, voice: voiceDefaults() })
 
 function readStore() {
   try {
@@ -118,6 +118,7 @@ function readStore() {
     if (!Array.isArray(s.plans)) s.plans = []
     if (!s.fired || typeof s.fired !== 'object') s.fired = {}
     s.prefs = { quiet: { from: '23:30', to: '07:30' }, system: true, ...(s.prefs || {}) }
+    s.ai = { provider: '', model: '', ...(s.ai || {}) }
     return s
   } catch { return EMPTY() }
 }
@@ -684,11 +685,25 @@ function bodyFor(rule, s, now) {
 }
 
 // ---------- 模型 ----------
-function makeAsk(ctx) {
+function makeAsk(ctx, getAI) {
   async function pickModel(strong) {
+    const pick = (typeof getAI === 'function' ? getAI() : null) || {}
+    const providers = ctx.llm.listProviders()
+    // 用户自己指定了模型就照他指定的来，只在这个模型不存在时才回落到自动挑
+    if (pick.model) {
+      let provider = pick.provider
+      if (!provider) {
+        for (const p of providers) {
+          try {
+            const ms = await ctx.llm.listModels(p.id)
+            if (ms.some((m) => m.id === pick.model)) { provider = p.id; break }
+          } catch {}
+        }
+      }
+      if (provider) return { provider, model: pick.model }
+    }
     const sel = ctx.get?.('agentDefaultModel')?.currentSelection?.()
     let provider = sel?.provider, model = sel?.model
-    const providers = ctx.llm.listProviders()
     if (!provider) provider = providers[0]?.id
     if (!provider) throw new Error('DSH 里还没有可用的模型，请先在设置里添加')
     try {
@@ -814,7 +829,7 @@ function tidyPlan(raw, dateStr, busy) {
 
 // ---------- 插件本体 ----------
 export function apply(ctx) {
-  const ask = makeAsk(ctx)
+  const ask = makeAsk(ctx, () => readStore().ai)
   let store = readStore()
   let timer = null
 
@@ -876,6 +891,7 @@ export function apply(ctx) {
       due: due.map((a) => ({ id: a.id, ruleId: a.ruleId, srcId: a.srcId || '', kind: a.kind, title: a.title, body: a.body, at: a.at })),
       next: next.slice(0, 6),
       today: {},
+      ai: store.ai || { provider: '', model: '' },
       voice: readVoice(store),
     }
   }
@@ -931,6 +947,28 @@ export function apply(ctx) {
       const r = await ask(COACH_SYSTEM, coachPrompt(p), { signal, maxTokens: 400 })
       const j = extractJSON(r.text)
       return { ok: true, model: r.model, result: { lines: (j.lines || []).filter((x) => typeof x === 'string').slice(0, 2) } }
+    }
+
+    // ---- 用哪个模型 ----
+    if (body.endpoint === 'ai') {
+      const action = p.action || 'get'
+      if (action === 'list') {
+        const providers = []
+        for (const pv of ctx.llm.listProviders()) {
+          let ms = []
+          try { ms = (await ctx.llm.listModels(pv.id)) || [] } catch {}
+          providers.push({ id: pv.id, name: pv.name || pv.id, models: ms.map((m) => ({ id: m.id, name: m.name || m.id })) })
+        }
+        const sel = ctx.get?.('agentDefaultModel')?.currentSelection?.() || {}
+        return { ok: true, result: { providers, pick: store.ai || { provider: '', model: '' }, auto: { provider: sel.provider || '', model: sel.model || '' } } }
+      }
+      if (action === 'set') {
+        const model = String(p.model || '').slice(0, 120)
+        store.ai = { provider: model ? String(p.provider || '').slice(0, 60) : '', model }
+        save()
+        return { ok: true, result: { pick: store.ai } }
+      }
+      return { ok: true, result: { pick: store.ai || { provider: '', model: '' } } }
     }
 
     // ---- 规律与提醒 ----
