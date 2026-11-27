@@ -423,21 +423,82 @@ function ffplayPath() {
   return ''
 }
 
-let playing = null
-
-// 一条一条念，不叠着响
-function startPlay(file) {
-  try { if (playing) playing.kill() } catch {}
-  playing = null
+// ffmpeg 通常和 ffplay 放在一起，用它量一小段音频的响度
+function ffmpegPath() {
   const ff = ffplayPath()
-  if (ff) {
+  if (!ff) return ''
+  const guess = join(dirname(ff), process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
+  try { if (existsSync(guess)) return guess } catch {}
+  return ''
+}
+
+// 末尾连续静音多少毫秒（10ms 一格，低于 -45dB 算静音）。
+// MiMo 合成出来的句子常常一直响到文件结束——听起来就是最后一个字只读了半截；
+// 正常的收尾应该有 40ms 以上的自然衰减。拿不到数（没有 ffmpeg）返回 null。
+function tailQuiet(file) {
+  return new Promise((resolve) => {
+    const ff = ffmpegPath()
+    if (!ff) { resolve(null); return }
+    let err = ''
+    const p = spawn(ff, ['-v', 'info', '-sseof', '-1.0', '-i', file,
+      '-af', 'asetnsamples=n=441,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level',
+      '-f', 'null', '-'], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
+    p.stderr.on('data', (d) => { if (err.length < 200000) err += d })
+    p.on('error', () => resolve(null))
+    p.on('close', () => {
+      const env = [...err.matchAll(/RMS_level=(-?[\d.]+|-inf)/g)].map((m) => (m[1] === '-inf' ? -120 : Number(m[1])))
+      if (!env.length) { resolve(null); return }
+      let i = env.length - 1
+      while (i >= 0 && env[i] < -45) i--
+      resolve(Math.max(0, (env.length - 1 - i) * 10))
+    })
+    setTimeout(() => { try { p.kill() } catch {} }, 8000).unref?.()
+  })
+}
+
+// 合成一条并挑收尾最干净的：同一条重合成会不一样，最多试 4 次，够 40ms 就收手，否则留最好那版。
+async function synthClean(v, text, dir) {
+  const tries = 4
+  let best = null
+  for (let i = 0; i < tries; i++) {
+    const r = await synthFor(v, text)
+    const tmp = join(dir, 'tmp-' + Date.now() + '-' + i + r.ext)
+    writeFileSync(tmp, r.buf)
+    const q = await tailQuiet(tmp)
+    const score = q == null ? 999 : q
+    if (!best || score > best.score) {
+      if (best) { try { unlinkSync(best.tmp) } catch {} }
+      best = { tmp, ext: r.ext, score }
+    } else {
+      try { unlinkSync(tmp) } catch {}
+    }
+    if (q == null || q >= 40) break
+  }
+  return best
+}
+
+let playing = null
+let queue = Promise.resolve()
+const tailOk = new Set() // 这个进程里确认过尾巴干净的文件，别每次播放都再量一遍
+
+// 一条一条念，不叠着响：新的一条排在后面，不打断正在念的（打断就会把最后一个字切掉）
+function playFile(file) {
+  return new Promise((resolve) => {
+    const ff = ffplayPath()
+    if (!ff) { resolve(new Error('没找到 ffplay')); return }
     const child = spawn(ff, ['-nodisp', '-autoexit', '-loglevel', 'quiet', file], { windowsHide: true, stdio: 'ignore' })
     playing = child
-    child.on('close', () => { if (playing === child) playing = null })
-    child.on('error', () => { if (playing === child) playing = null })
-    return
-  }
-  throw new Error('没找到 ffplay：装个 ffmpeg，或者把 ffplay 放进 PATH')
+    const done = () => { if (playing === child) playing = null; resolve() }
+    child.on('close', done)
+    child.on('error', done)
+  })
+}
+
+function startPlay(file) {
+  const ff = ffplayPath()
+  if (!ff) throw new Error('没找到 ffplay：装个 ffmpeg，或者把 ffplay 放进 PATH')
+  queue = queue.then(() => playFile(file)).catch(() => {})
+  return queue
 }
 
 // 记一条失败：带上发生时间，界面上好判断这是不是刚才那次
@@ -454,10 +515,21 @@ async function speakNow(v, text) {
   const key = cacheKey(v, clean)
   let file = findCached(dir, key)
   const cached = !!file
+  // 旧的缓存文件里就有「最后一个字只读一半」的：量出来收尾几乎没有衰减就重合成一份盖掉
+  if (file && !tailOk.has(file)) {
+    const q = await tailQuiet(file)
+    if (q != null && q < 25) {
+      try { unlinkSync(file) } catch {}
+      file = ''
+    } else {
+      tailOk.add(file)
+    }
+  }
   if (!file) {
-    const { buf, ext } = await synthFor(v, clean)
-    file = join(dir, key + ext)
-    writeFileSync(file, buf)
+    const pick = await synthClean(v, clean, dir)
+    file = join(dir, key + pick.ext)
+    try { renameSync(pick.tmp, file) } catch { writeFileSync(file, readFileSync(pick.tmp)); try { unlinkSync(pick.tmp) } catch {} }
+    tailOk.add(file)
   }
   startPlay(file)
   cacheStat()
@@ -935,6 +1007,7 @@ export function apply(ctx) {
       if (action === 'stop') {
         try { if (playing) playing.kill() } catch {}
         playing = null
+        queue = Promise.resolve() // 队列里排着的也一起作废
         return { ok: true, result: { stopped: true } }
       }
       return { ok: false, error: '未知的 voice 动作' }
