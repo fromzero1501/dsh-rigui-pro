@@ -2,7 +2,7 @@
 // 一张卡管住「喝水、吃饭、洗澡、洗头、睡觉」：今天做了几次、上一次是几点、下一次什么时候提醒。
 // 点一下就记下，不做二次确认；记完提醒自动往后顺延。
 // 每件事旁边一个小喇叭：点一下当场念这句（试听），同时决定这件事要不要念。
-import React, { useMemo, useState } from 'react'
+import React, { useMemo } from 'react'
 import { ROUTINE, routineName, fmtHM, pad2 } from './habits.js'
 
 const CSS = `
@@ -35,17 +35,10 @@ const CSS = `
 .rh-sw.on{background:#1E9E6A}
 .rh-sw::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:8px;background:#fff;transition:transform .18s cubic-bezier(.2,.8,.2,1)}
 .rh-sw.on::after{transform:translateX(16px)}
-.rh-v{display:flex;flex-direction:column;gap:7px;margin-top:6px}
-.rh-vrow{display:flex;align-items:center;gap:8px}
-.rh-vrow .n{width:74px;flex:none;font-size:12.5px;color:var(--ink2,#6B7280)}
-.rh-in{flex:1;min-width:0;height:30px;padding:0 9px;border-radius:8px;border:1px solid var(--rule,rgba(31,35,40,.16));background:transparent;color:inherit;font:inherit;font-size:12.5px}
-.rh-seg{display:inline-flex;border:1px solid var(--rule,rgba(31,35,40,.14));border-radius:9px;overflow:hidden}
-.rh-seg button{height:26px;padding:0 10px;border:0;background:transparent;color:inherit;font:inherit;font-size:12.5px;cursor:pointer}
-.rh-seg button.on{background:rgba(242,153,74,.2);font-weight:600}
-.rh-go{height:30px;padding:0 13px;border-radius:9px;border:0;background:#1F2328;color:#F4F5F1;font:inherit;font-size:12.5px;cursor:pointer}
-.rh-go.ghost{background:rgba(31,35,40,.07);color:inherit}
-.rh-note{font-size:12px;color:var(--ink2,#6B7280);line-height:1.6;margin-top:6px}
-.rh-sub{font-size:12.5px;font-weight:600;margin:16px 0 6px}
+.rh-note{font-size:12px;color:var(--ink2,#6B7280);line-height:1.6;margin:6px 0 0}
+.rh-foot{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:8px}
+.rh-open{flex:none;height:28px;padding:0 11px;border-radius:9px;border:1px solid var(--rule,rgba(31,35,40,.14));background:transparent;color:inherit;font:inherit;font-size:12.5px;cursor:pointer;transition:background .12s ease}
+.rh-open:hover{background:rgba(31,35,40,.06)}
 .rh-stack{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:10px;width:min(430px,calc(100vw - 32px))}
 .rh-toast{background:#1F2328;color:#F4F5F1;border-radius:18px;padding:14px 16px;box-shadow:0 18px 44px rgba(16,20,24,.34);animation:rh-rise .32s cubic-bezier(.2,.8,.2,1) both}
 @keyframes rh-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
@@ -79,7 +72,7 @@ function Chip({ kind, voice, onSay, onLog, done, title, children }) {
 }
 
 export function RoutineCard({ ctx }) {
-  const { S, rules, onLog, next, voice, onSay } = ctx
+  const { S, rules, onLog, next, voice, onSay, onOpenVoice } = ctx
   const water = (S.routines && S.routines.today && S.routines.today.water) || { count: 0, ml: 0, lastAt: 0 }
   const shower = (S.routines && S.routines.today && S.routines.today.shower) || null
   const hair = (S.routines && S.routines.last && S.routines.last.hair) || null
@@ -118,31 +111,16 @@ export function RoutineCard({ ctx }) {
         </span>
         {water.lastAt ? <span>{fmtHM(water.lastAt)} 喝过</span> : null}
       </div>
-      <p className="rh-note">喇叭亮着就会念；点一下先听，再点一下就这件事不念。</p>
+      <div className="rh-foot">
+        <p className="rh-note">喇叭亮着就会念；点一下先听，再点一下这件事就不念。</p>
+        <button type="button" className="rh-open" onClick={onOpenVoice}>🔊 语音设置</button>
+      </div>
     </>
   )
 }
 
-const READ_KINDS = ['water', 'shower', 'hair', 'meal', 'sleep']
-
-export function BackRoutine({ rules, onToggle, onEvery, onGap, voice, onVoice, onTest, onSaved }) {
-  const v = voice || {}
-  const [d, setD] = useState(() => ({ cloud: { ...(v.cloud || {}) }, local: { ...(v.local || {}) } }))
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState('')
-  const on = !!v.enabled
-  const provider = v.provider === 'local' ? 'local' : 'cloud'
-  const setField = (group, f, val) => setD((x) => ({ ...x, [group]: { ...x[group], [f]: val } }))
-
-  const save = async () => {
-    setBusy(true)
-    try {
-      const r = await onVoice({ enabled: on, provider, cloud: d.cloud, local: d.local })
-      setMsg(r ? '存好了' : '存的时候出了点问题')
-      if (onSaved) onSaved()
-    } finally { setBusy(false) }
-  }
-
+// 背面只剩提醒节奏；语音那套搬到独立面板（src/voice.jsx），卡面底部的按钮打开。
+export function BackRoutine({ rules, onToggle, onEvery, onGap, onOpenVoice }) {
   return (
     <>
       <style>{CSS}</style>
@@ -171,73 +149,10 @@ export function BackRoutine({ rules, onToggle, onEvery, onGap, voice, onVoice, o
         ))}
       </div>
       <p className="rh-note">点一下就记下，记完自动顺延；面板关着也会弹系统提醒。</p>
-
-      <div className="rh-sub">念出来</div>
-      <div className="rh-vrow">
-        <span className="n">到点念</span>
-        <button type="button" className={'rh-sw' + (on ? ' on' : '')} onClick={() => onVoice({ enabled: !on })} aria-pressed={on} aria-label={on ? '关掉语音' : '打开语音'} />
-        <span style={{ flex: 1 }} />
-        <span className="rh-seg">
-          <button type="button" className={provider === 'cloud' ? 'on' : ''} onClick={() => onVoice({ provider: 'cloud' })}>云端</button>
-          <button type="button" className={provider === 'local' ? 'on' : ''} onClick={() => onVoice({ provider: 'local' })}>本地</button>
-        </span>
+      <div className="rh-foot">
+        <p className="rh-note">念不念、用哪个声音，都在语音设置里。</p>
+        <button type="button" className="rh-open" onClick={onOpenVoice}>🔊 语音设置</button>
       </div>
-
-      {provider === 'cloud' ? (
-        <div className="rh-v">
-          <div className="rh-vrow"><span className="n">地址</span><input className="rh-in" value={d.cloud.baseUrl || ''} onChange={(e) => setField('cloud', 'baseUrl', e.target.value)} placeholder="https://api.openai.com/v1" /></div>
-          <div className="rh-vrow"><span className="n">密钥</span><input className="rh-in" value={d.cloud.apiKey || ''} onChange={(e) => setField('cloud', 'apiKey', e.target.value)} placeholder="sk-…（明文存在本机）" /></div>
-          <div className="rh-vrow"><span className="n">模型</span><input className="rh-in" value={d.cloud.model || ''} onChange={(e) => setField('cloud', 'model', e.target.value)} placeholder="gpt-4o-mini-tts / tts-1" /></div>
-          <div className="rh-vrow"><span className="n">音色</span><input className="rh-in" value={d.cloud.voice || ''} onChange={(e) => setField('cloud', 'voice', e.target.value)} placeholder="alloy" /></div>
-        </div>
-      ) : (
-        <div className="rh-v">
-          <div className="rh-vrow">
-            <span className="n">形态</span>
-            <span className="rh-seg">
-              <button type="button" className={(d.local.shape || 'gradio') === 'gradio' ? 'on' : ''} onClick={() => setField('local', 'shape', 'gradio')}>IndexTTS</button>
-              <button type="button" className={d.local.shape === 'openai' ? 'on' : ''} onClick={() => setField('local', 'shape', 'openai')}>OpenAI 兼容</button>
-            </span>
-          </div>
-          <div className="rh-vrow"><span className="n">服务地址</span><input className="rh-in" value={d.local.baseUrl || ''} onChange={(e) => setField('local', 'baseUrl', e.target.value)} placeholder="http://127.0.0.1:7860" /></div>
-          {(d.local.shape || 'gradio') === 'gradio' ? (
-            <>
-              <div className="rh-vrow"><span className="n">接口名</span><input className="rh-in" value={d.local.apiName || ''} onChange={(e) => setField('local', 'apiName', e.target.value)} placeholder="gen_single" /></div>
-              <div className="rh-vrow"><span className="n">参考音频</span><input className="rh-in" value={d.local.voicePath || ''} onChange={(e) => setField('local', 'voicePath', e.target.value)} placeholder="D:\\voices\\me.wav" /></div>
-              <div className="rh-vrow"><span className="n">参数模板</span><input className="rh-in" value={d.local.payload || ''} onChange={(e) => setField('local', 'payload', e.target.value)} placeholder='留空就发 ["文案","参考音频"]' /></div>
-            </>
-          ) : (
-            <>
-              <div className="rh-vrow"><span className="n">模型</span><input className="rh-in" value={d.local.model || ''} onChange={(e) => setField('local', 'model', e.target.value)} placeholder="tts-1" /></div>
-              <div className="rh-vrow"><span className="n">音色</span><input className="rh-in" value={d.local.voice || ''} onChange={(e) => setField('local', 'voice', e.target.value)} placeholder="zh-female" /></div>
-            </>
-          )}
-          <p className="rh-note">本地就走 IndexTTS 的 Gradio 接口（接口名可在 {d.local.baseUrl || '服务'} 的 /gradio_api/info 里查）。</p>
-        </div>
-      )}
-
-      <div className="rh-vrow" style={{ marginTop: 10 }}>
-        <button type="button" className="rh-go" onClick={save} disabled={busy}>{busy ? '存…' : '保存'}</button>
-        <button type="button" className="rh-go ghost" onClick={() => onTest && onTest()}>念一句试试</button>
-      </div>
-      {msg ? <p className="rh-note">{msg}</p> : null}
-
-      <div className="rh-sub">哪几件要念</div>
-      <div className="rh-v">
-        {READ_KINDS.map((k) => {
-          const rOn = !(v.read && v.read[k] === false)
-          return (
-            <div className="rh-vrow" key={k}>
-              <span className="n">{routineName(k)}</span>
-              <button type="button" className={'rh-sw' + (rOn ? ' on' : '')} onClick={() => onVoice({ read: { [k]: !rOn } })} aria-pressed={rOn} aria-label={routineName(k) + (rOn ? '要念' : '不念')} />
-            </div>
-          )
-        })}
-      </div>
-      <p className="rh-note">
-        播放器：{v.ffplay ? 'ffplay 可用' : '没找到 ffplay（非 wav 得装）'} · 缓存 {v.cache ? v.cache.count : 0} 条
-        {v.lastError ? ' · 上次出错：' + v.lastError : ''}
-      </p>
     </>
   )
 }

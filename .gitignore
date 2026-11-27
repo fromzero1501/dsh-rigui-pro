@@ -4,3 +4,4 @@ dist/
 *.log
 *.bak
 *.bak-*
+package-lock.json

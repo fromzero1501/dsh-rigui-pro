@@ -10,6 +10,7 @@ import { ReceiptPrinter, RECEIPT_CSS } from './receipt.jsx'
 import { MoneyStrip, SleepSky, useSleepRow, MoveBars, useTaste, WeightScrub, BackEnergy, BackMoney, BackSleep, BackMove, BackBody, CARDS_CSS } from './cards.jsx'
 import { suggestGoals, GoalsPanel, GoalsButton, GOALS_CSS } from './goals.jsx'
 import PlanPanel from './plan.jsx'
+import VoicePanel from './voice.jsx'
 import { RoutineCard, BackRoutine, ReminderStack } from './habits.jsx'
 import { loadRules, saveRules, ruleLine, routineName, guessRoutine, guessWater, sinceLast } from './habits.js'
 
@@ -348,6 +349,7 @@ export default function LifeApp() {
   const [coachLines, setCoachLines] = useState([])
   const [voice, setVoice] = useState(null)
   const [voiceMeta, setVoiceMeta] = useState({ ffplay: false, cache: null })
+  const [voiceOpen, setVoiceOpen] = useState(false)
   const [plan, setPlan] = useState({ open: false, busy: false, draft: null, error: '', date: '', text: '' })
   const rootRef = useRef(null), inputRef = useRef(null), refs = useRef({})
 
@@ -1204,8 +1206,8 @@ export default function LifeApp() {
           <NextCard P={P} S={S} onDone={doneEvent} />
 
           {/* 日常：喝水、洗澡、洗头 */}
-          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} voice={voice ? { ...voice, ffplay: voiceMeta.ffplay, cache: voiceMeta.cache } : null} onVoice={voiceSet} onTest={voiceTest} />}>
-            <RoutineCard ctx={{ S, rules, onLog: logRoutine, next: reminderNext, voice, onSay: sayRoutine }} />
+          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} onOpenVoice={() => setVoiceOpen(true)} />}>
+            <RoutineCard ctx={{ S, rules, onLog: logRoutine, next: reminderNext, voice, onSay: sayRoutine, onOpenVoice: () => setVoiceOpen(true) }} />
             {coachLines[0] ? <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink2)' }}>AI · {coachLines[0]}</div> : null}
           </Card>
 
@@ -1409,6 +1411,9 @@ export default function LifeApp() {
       <PlanPanel open={plan.open} draft={plan.draft} date={plan.date} busy={plan.busy} error={plan.error}
         onClose={() => setPlan({ open: false, busy: false, draft: null, error: '', date: '', text: '' })}
         onAccept={acceptPlan} onReplan={(c) => openPlan(plan.text, c)} />
+      <VoicePanel open={voiceOpen} voice={voice ? { ...voice, ffplay: voiceMeta.ffplay, cache: voiceMeta.cache } : null}
+        onClose={() => setVoiceOpen(false)} onSave={voiceSet} onTest={voiceTest}
+        onToggleRead={(k, on) => voiceSet({ read: { [k]: on } })} />
       <ReminderStack items={reminders} onDone={reminderDone} onSnooze={reminderSnooze} onSkip={reminderSkip} />
       {bursts.map((b) => (
         <div key={b.id} aria-hidden="true" style={{ position: 'fixed', left: b.x, top: b.y, width: 0, height: 0, zIndex: 40, pointerEvents: 'none' }}>
