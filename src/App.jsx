@@ -346,6 +346,8 @@ export default function LifeApp() {
   const [reminders, setReminders] = useState([])
   const [reminderNext, setReminderNext] = useState([])
   const [coachLines, setCoachLines] = useState([])
+  const [voice, setVoice] = useState(null)
+  const [voiceMeta, setVoiceMeta] = useState({ ffplay: false, cache: null })
   const [plan, setPlan] = useState({ open: false, busy: false, draft: null, error: '', date: '', text: '' })
   const rootRef = useRef(null), inputRef = useRef(null), refs = useRef({})
 
@@ -571,9 +573,39 @@ export default function LifeApp() {
 
   // ===== 规律：记一笔、同步规则、接提醒 =====
   const pushRoutine = useCallback((payload) => callHost('routine', payload).then((j) => {
-    if (j && j.result) { setReminders(j.result.due || []); setReminderNext(j.result.next || []) }
+    if (j && j.result) {
+      setReminders(j.result.due || [])
+      setReminderNext(j.result.next || [])
+      if (j.result.voice) setVoice(j.result.voice)
+    }
     return j
   }).catch(() => null), [])
+
+  // ===== 语音：配一下、念一句 =====
+  const runVoice = async (payload) => {
+    try {
+      const j = await callHost('voice', payload)
+      const r = (j && j.result) || {}
+      if (r.voice) setVoice(r.voice)
+      if (typeof r.ffplay === 'boolean') setVoiceMeta({ ffplay: r.ffplay, cache: r.cache || null })
+      if (j && j.ok === false) say(j.error || '语音没成')
+      return j
+    } catch (e) {
+      say('语音没通：' + String((e && e.message) || e))
+      return null
+    }
+  }
+  const voiceSet = (patch) => runVoice({ action: 'set', voice: patch })
+  const voiceTest = () => runVoice({ action: 'test' })
+  // 小喇叭：亮着就念；点一下先听，再点一下就这件事不念
+  const sayRoutine = (kind) => {
+    if (!voice) { runVoice({ action: 'say', kind }); return }
+    const on = !(voice.read && voice.read[kind] === false)
+    if (on) { voiceSet({ read: { [kind]: false } }); say(routineName(kind) + ' 不念了') }
+    else { voiceSet({ read: { [kind]: true } }); runVoice({ action: 'say', kind }) }
+  }
+  // 打开就问一次：播放器在不在、缓存有多少
+  useEffect(() => { runVoice({ action: 'get' }) }, [])
 
   const logRoutine = useCallback((kind, amount) => {
     const t = Date.now()
@@ -1172,8 +1204,8 @@ export default function LifeApp() {
           <NextCard P={P} S={S} onDone={doneEvent} />
 
           {/* 日常：喝水、洗澡、洗头 */}
-          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} />}>
-            <RoutineCard ctx={{ S, rules, onLog: logRoutine, next: reminderNext }} />
+          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} voice={voice ? { ...voice, ffplay: voiceMeta.ffplay, cache: voiceMeta.cache } : null} onVoice={voiceSet} onTest={voiceTest} />}>
+            <RoutineCard ctx={{ S, rules, onLog: logRoutine, next: reminderNext, voice, onSay: sayRoutine }} />
             {coachLines[0] ? <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink2)' }}>AI · {coachLines[0]}</div> : null}
           </Card>
 

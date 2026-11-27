@@ -5,10 +5,11 @@
 // 4) /api/rigui-pro/routine 规律与提醒：规则同步、完成打点、到点提醒
 // 数据：记录仍在本机浏览器里；这里只存「规律规则 + 最近完成时间 + 待触发提醒」，
 // 落在 $DSH_HOME/rigui-pro.json，不出本机。
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { dirname, join } from 'node:path'
-import { exec } from 'node:child_process'
+import { exec, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 
 export const name = 'dsh-rigui-pro'
 export const inject = ['llm', 'connection']
@@ -101,7 +102,7 @@ const DEFAULT_RULES = [
   { id: 'sleep', kind: 'sleep', title: '该睡了', mode: 'fixed', times: ['23:30'], enabled: true },
 ]
 
-const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0 })
+const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0, voice: voiceDefaults() })
 
 function readStore() {
   try {
@@ -142,6 +143,252 @@ Start-Sleep -Seconds 2
 $n.Dispose()`
   const b64 = Buffer.from(ps, 'utf16le').toString('base64')
   exec(`powershell -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${b64}`, { windowsHide: true }, () => {})
+}
+
+// ---------- 语音 ----------
+// 文案固定几句轮换，不每次问模型；合成结果按「配置 + 文案」落盘缓存复用。
+const VOICE_DIR = join(dirname(STORE_FILE), 'rigui-pro', 'voice')
+const MAX_CACHE_FILES = 200
+
+const PHRASES = {
+  water: ['来，喝口水。', '杯子该续上了。', '喝一杯，顺手记一下。', '水放这儿了，先喝一口。'],
+  shower: ['该洗澡了。', '热水放好，去洗个澡。', '洗澡时间到了。'],
+  hair: ['今天该洗头了。', '顺带把头发洗了。'],
+  meal: ['到饭点了。', '该吃饭了，别拖。', '先吃口饭再干。'],
+  sleep: ['放下手机，睡了。', '该睡了，明天还要干活。', '关灯睡觉。'],
+  teeth: ['刷牙去。', '别忘了刷牙。'],
+  stretch: ['站起来动一动。', '脖子手腕转一转。'],
+  custom: ['到点了。', '该做这件事了。'],
+}
+
+function voiceDefaults() {
+  return {
+    enabled: true,
+    provider: 'cloud',
+    read: { water: true, shower: true, hair: true, meal: true, sleep: true, teeth: true, stretch: true, custom: true },
+    cloud: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini-tts', voice: 'alloy', format: 'mp3' },
+    local: { shape: 'gradio', baseUrl: 'http://127.0.0.1:7860', apiName: 'gen_single', voicePath: '', format: 'wav', payload: '' },
+    lastAt: 0,
+    lastError: '',
+  }
+}
+
+// 老存档缺字段就用默认补齐，不覆盖用户已填的值
+function readVoice(store) {
+  const d = voiceDefaults()
+  const raw = (store && store.voice) || {}
+  return {
+    ...d,
+    ...raw,
+    read: { ...d.read, ...(raw.read || {}) },
+    cloud: { ...d.cloud, ...(raw.cloud || {}) },
+    local: { ...d.local, ...(raw.local || {}) },
+  }
+}
+
+const VOICE_FIELDS = {
+  cloud: ['baseUrl', 'apiKey', 'model', 'voice', 'format'],
+  local: ['shape', 'baseUrl', 'apiName', 'voicePath', 'format', 'payload'],
+}
+
+function mergeVoice(v, patch) {
+  const out = { ...v, read: { ...v.read }, cloud: { ...v.cloud }, local: { ...v.local } }
+  if (!patch || typeof patch !== 'object') return out
+  if (typeof patch.enabled === 'boolean') out.enabled = patch.enabled
+  if (patch.provider === 'cloud' || patch.provider === 'local') out.provider = patch.provider
+  if (patch.read && typeof patch.read === 'object') {
+    for (const k of Object.keys(patch.read).slice(0, 20)) {
+      if (typeof patch.read[k] === 'boolean') out.read[String(k).slice(0, 16)] = patch.read[k]
+    }
+  }
+  for (const group of ['cloud', 'local']) {
+    const p = patch[group]
+    if (!p || typeof p !== 'object') continue
+    for (const f of VOICE_FIELDS[group]) {
+      if (typeof p[f] === 'string') out[group][f] = p[f].slice(0, f === 'payload' ? 4000 : 300)
+    }
+  }
+  return out
+}
+
+// 同一天同一件事说同一句，隔天换一句；不为每句话去调模型
+function phraseFor(store, kind, now) {
+  const pool = PHRASES[kind] || PHRASES.custom
+  const n = Math.floor((now || Date.now()) / DAY) + (store && store.logs ? store.logs.length : 0)
+  return pool[Math.abs(n) % pool.length]
+}
+
+function voiceDir() {
+  try { mkdirSync(VOICE_DIR, { recursive: true }) } catch {}
+  return VOICE_DIR
+}
+
+function cacheKey(v, text) {
+  const src = v.provider === 'local'
+    ? ['local', v.local.shape, v.local.baseUrl, v.local.apiName, v.local.voicePath, text]
+    : ['cloud', v.cloud.baseUrl, v.cloud.model, v.cloud.voice, text]
+  return createHash('sha1').update(JSON.stringify(src)).digest('hex').slice(0, 16)
+}
+
+function findCached(dir, key) {
+  for (const e of ['.mp3', '.wav']) {
+    const p = join(dir, key + e)
+    try { if (existsSync(p) && statSync(p).size > 800) return p } catch {}
+  }
+  return ''
+}
+
+function cacheStat() {
+  try {
+    const dir = voiceDir()
+    const files = readdirSync(dir).map((f) => {
+      try { const st = statSync(join(dir, f)); return { f, size: st.size, mt: st.mtimeMs } } catch { return null }
+    }).filter(Boolean).sort((a, b) => b.mt - a.mt)
+    for (const x of files.slice(MAX_CACHE_FILES)) { try { unlinkSync(join(dir, x.f)) } catch {} }
+    const keep = files.slice(0, MAX_CACHE_FILES)
+    return { count: keep.length, bytes: keep.reduce((n, x) => n + x.size, 0) }
+  } catch { return { count: 0, bytes: 0 } }
+}
+
+// OpenAI 兼容的 /audio/speech（云端各家基本都照这个形状，本地 GPT-SoVITS 之类也常见）
+async function synthOpenAI(text, cfg) {
+  const base = String(cfg.baseUrl || '').replace(/\/+$/, '')
+  if (!base) throw new Error('还没填合成服务地址')
+  const fmt = cfg.format === 'wav' ? 'wav' : 'mp3'
+  const headers = { 'content-type': 'application/json' }
+  if (cfg.apiKey) headers.authorization = 'Bearer ' + cfg.apiKey
+  const r = await fetch(base + '/audio/speech', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model: cfg.model || 'tts-1', voice: cfg.voice || 'alloy', input: text, response_format: fmt }),
+    signal: AbortSignal.timeout(30000),
+  })
+  if (!r.ok) throw new Error('合成服务 ' + r.status + ' ' + String(await r.text()).slice(0, 160))
+  const buf = Buffer.from(await r.arrayBuffer())
+  if (buf.length < 800) throw new Error('合成结果太小，当成失败')
+  return { buf, ext: '.' + fmt }
+}
+
+function findAudioUrl(node, base, depth = 0) {
+  if (depth > 6 || node == null) return ''
+  if (typeof node === 'string') {
+    if (/^https?:\/\//i.test(node) && /\.(wav|mp3|ogg|flac|m4a)(\?|$)/i.test(node)) return node
+    if (/\.(wav|mp3|ogg|flac|m4a)$/i.test(node) && node.length < 400) return base + '/gradio_api/file=' + encodeURI(node)
+    return ''
+  }
+  if (Array.isArray(node)) {
+    for (const x of node) { const u = findAudioUrl(x, base, depth + 1); if (u) return u }
+    return ''
+  }
+  if (typeof node === 'object') {
+    if (typeof node.url === 'string') { const u = findAudioUrl(node.url, base, depth + 1); if (u) return u }
+    for (const k of Object.keys(node)) { const u = findAudioUrl(node[k], base, depth + 1); if (u) return u }
+  }
+  return ''
+}
+
+// 本地 IndexTTS（Gradio WebUI）：接口名 + 参数模板，模板里 {{text}} / {{voice}} 会被替换
+async function synthGradio(text, cfg) {
+  const base = String(cfg.baseUrl || '').replace(/\/+$/, '')
+  const api = String(cfg.apiName || 'gen_single').trim()
+  if (!base) throw new Error('还没填 IndexTTS 地址')
+  let data
+  const tpl = String(cfg.payload || '').trim()
+  if (tpl) {
+    const body = tpl
+      .replace(/\{\{text\}\}/g, () => JSON.stringify(text).slice(1, -1))
+      .replace(/\{\{voice\}\}/g, () => JSON.stringify(cfg.voicePath || '').slice(1, -1))
+    let parsed
+    try { parsed = JSON.parse(body) } catch { throw new Error('参数模板不是合法 JSON') }
+    data = Array.isArray(parsed) ? parsed : (parsed.data || [])
+  } else {
+    data = [text, cfg.voicePath || '']
+  }
+  const call = await fetch(base + '/gradio_api/call/' + encodeURIComponent(api), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ data }),
+    signal: AbortSignal.timeout(20000),
+  })
+  if (!call.ok) throw new Error('IndexTTS ' + call.status + ' ' + String(await call.text()).slice(0, 160))
+  const { event_id: eventId } = await call.json()
+  if (!eventId) throw new Error('IndexTTS 没给出任务号，看看接口名对不对')
+  const ev = await fetch(base + '/gradio_api/call/' + encodeURIComponent(api) + '/' + eventId, { signal: AbortSignal.timeout(120000) })
+  if (!ev.ok) throw new Error('IndexTTS 取结果 ' + ev.status)
+  const raw = await ev.text()
+  let last = null
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim()
+    if (!t.startsWith('data:')) continue
+    const payload = t.slice(5).trim()
+    if (!payload || payload === 'null') continue
+    try { last = JSON.parse(payload) } catch {}
+  }
+  const url = findAudioUrl(last, base)
+  if (!url) throw new Error('IndexTTS 没返回音频，检查参数模板')
+  const audio = await fetch(url, { signal: AbortSignal.timeout(30000) })
+  if (!audio.ok) throw new Error('取音频 ' + audio.status)
+  const buf = Buffer.from(await audio.arrayBuffer())
+  if (buf.length < 800) throw new Error('音频太小，当成失败')
+  const ext = /\.wav(\?|$)/i.test(url) ? '.wav' : '.mp3'
+  return { buf, ext }
+}
+
+const FFPLAY_HINTS = [
+  process.env.FFPLAY_PATH,
+  'ffplay',
+  'D:\\100 SoftWare\\110 BasicSoftware\\ffmpeg-8.1.1-essentials_build\\bin\\ffplay.exe',
+]
+
+function ffplayPath() {
+  for (const p of FFPLAY_HINTS) {
+    if (!p || p === 'ffplay') continue
+    try { if (existsSync(p)) return p } catch {}
+  }
+  return ''
+}
+
+let playing = null
+
+function playWavPS(file) {
+  const ps = `$s = New-Object System.Media.SoundPlayer "${String(file).replace(/"/g, '')}"; $s.PlaySync()`
+  const b64 = Buffer.from(ps, 'utf16le').toString('base64')
+  playing = exec(`powershell -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${b64}`, { windowsHide: true }, () => { playing = null })
+}
+
+// 一条一条念，不叠着响
+function startPlay(file) {
+  try { if (playing) playing.kill() } catch {}
+  playing = null
+  const ff = ffplayPath()
+  if (ff) {
+    const child = spawn(ff, ['-nodisp', '-autoexit', '-loglevel', 'quiet', file], { windowsHide: true, stdio: 'ignore' })
+    playing = child
+    child.on('close', () => { if (playing === child) playing = null })
+    child.on('error', () => { if (playing === child) playing = null })
+    return
+  }
+  if (platform() === 'win32' && /\.wav$/i.test(file)) { playWavPS(file); return }
+  throw new Error('没找到 ffplay：装个 ffmpeg，或者把 ffplay 放进 PATH')
+}
+
+async function speakNow(v, text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 300)
+  if (!clean) throw new Error('没有可念的内容')
+  const dir = voiceDir()
+  const key = cacheKey(v, clean)
+  let file = findCached(dir, key)
+  const cached = !!file
+  if (!file) {
+    const { buf, ext } = v.provider === 'local'
+      ? (v.local.shape === 'openai' ? await synthOpenAI(clean, v.local) : await synthGradio(clean, v.local))
+      : await synthOpenAI(clean, v.cloud)
+    file = join(dir, key + ext)
+    writeFileSync(file, buf)
+  }
+  startPlay(file)
+  cacheStat()
+  return { file, cached, text: clean }
 }
 
 // ---------- 提醒推算 ----------
@@ -397,6 +644,16 @@ export function apply(ctx) {
           const one = created[0]
           notify(one.title, created.length > 1 ? `${one.body}（另有 ${created.length - 1} 条）` : one.body)
         }
+        // 到点念一句：免打扰时段不念，单条被关掉的也不念
+        const v = readVoice(store)
+        const last = store.alarms[store.alarms.length - 1]
+        if (v.enabled && last && v.read[last.kind] !== false && !inQuiet(store, now)) {
+          speakNow(v, phraseFor(store, last.kind, now)).catch((e) => {
+            v.lastError = String((e && e.message) || e).slice(0, 200)
+            store.voice = v
+            save()
+          })
+        }
       }
     } catch (e) { console.warn('[dsh-rigui-pro] 提醒轮询出错', e && e.message) }
   }
@@ -416,7 +673,8 @@ export function apply(ctx) {
       rules: store.rules,
       due: due.map((a) => ({ id: a.id, ruleId: a.ruleId, kind: a.kind, title: a.title, body: a.body, at: a.at })),
       next,
-      today: {}
+      today: {},
+      voice: readVoice(store),
     }
   }
 
@@ -521,6 +779,42 @@ export function apply(ctx) {
         return { ok: true, result: statePayload(now) }
       }
       return { ok: false, error: '未知的 routine 动作' }
+    }
+
+    // ---- 语音 ----
+    if (body.endpoint === 'voice') {
+      const v = readVoice(store)
+      const action = p.action || 'get'
+      if (action === 'get') return { ok: true, result: { voice: v, ffplay: !!ffplayPath(), cache: cacheStat(), playing: !!playing } }
+      if (action === 'set') {
+        const next = mergeVoice(v, p.voice)
+        store.voice = next
+        save()
+        return { ok: true, result: { voice: next, ffplay: !!ffplayPath(), cache: cacheStat() } }
+      }
+      if (action === 'say' || action === 'test') {
+        const kind = String(p.kind || '').slice(0, 16)
+        const text = String(p.text || '').slice(0, 300) || (kind ? phraseFor(store, kind, now) : '') || '语音试听，一二三。'
+        try {
+          const r = await speakNow(v, text)
+          v.lastAt = now
+          v.lastError = ''
+          store.voice = v
+          save()
+          return { ok: true, result: { played: true, text: r.text, cached: r.cached, file: r.file } }
+        } catch (e) {
+          v.lastError = String((e && e.message) || e).slice(0, 200)
+          store.voice = v
+          save()
+          return { ok: false, error: v.lastError }
+        }
+      }
+      if (action === 'stop') {
+        try { if (playing) playing.kill() } catch {}
+        playing = null
+        return { ok: true, result: { stopped: true } }
+      }
+      return { ok: false, error: '未知的 voice 动作' }
     }
 
     return { ok: false, error: '未知接口' }
