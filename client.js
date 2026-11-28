@@ -5161,12 +5161,12 @@ var CSS4 = `
 .wh-minus{width:27px;height:27px;flex:none;border-radius:9px;border:1px solid var(--rule,rgba(31,35,40,.12));background:transparent;color:var(--ink2,#6B7280);font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:0}
 .wh-minus:disabled{opacity:.35;cursor:default}
 .md-zone{display:flex;align-items:center;gap:12px;margin-left:auto;flex:0 0 auto;min-width:0}
-.md-pot{position:relative;flex:none;width:58px;height:98px;display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 1px 2px rgba(31,35,40,.05))}
-.md-cap{width:32px;height:9px;border-radius:3px 3px 2px 2px;background:linear-gradient(to bottom,#F4F7FA,#D7DEE7);box-shadow:inset 0 -1px 0 rgba(31,35,40,.10);flex:none}
-.md-body{position:relative;flex:1;width:100%;margin-top:2px;border:1.5px solid rgba(31,35,40,.16);border-radius:7px 7px 12px 12px;background:linear-gradient(to bottom,#FFFFFF,#F6F8FA);overflow:hidden;min-height:0;box-shadow:inset 0 1px 3px rgba(31,35,40,.05)}
+.md-pot{position:relative;flex:none;width:76px;height:98px;display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 1px 2px rgba(31,35,40,.05))}
+.md-cap{width:44px;height:10px;border-radius:4px 4px 2px 2px;background:linear-gradient(to bottom,#F4F7FA,#D7DEE7);box-shadow:inset 0 -1px 0 rgba(31,35,40,.10);flex:none}
+.md-body{position:relative;flex:1;width:100%;margin-top:2px;border:1.5px solid rgba(31,35,40,.16);border-radius:8px 8px 14px 14px;background:linear-gradient(to bottom,#FFFFFF,#F6F8FA);overflow:hidden;min-height:0;box-shadow:inset 0 1px 3px rgba(31,35,40,.05)}
 .md-pot.empty .md-body{border-style:dashed;opacity:.55}
-.md-slots{position:absolute;inset:4px}
-.md-pill{position:absolute;width:15px;height:8px;border-radius:4px;box-sizing:border-box;background:linear-gradient(180deg,rgba(255,255,255,.20) 0%,rgba(255,255,255,0) 52%,rgba(31,35,40,.10) 100%),linear-gradient(90deg,color-mix(in srgb,var(--pc,#9AA1AA) 88%,#9AA5B1) 0 50%,#F1F5F9 50% 100%);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pc,#9AA1AA) 42%,#B4C0CD),0 1px 1.5px rgba(31,35,40,.20);transform:translate(-50%,-50%) rotate(var(--rot,0deg));transition:opacity .24s ease,filter .24s ease;pointer-events:none}
+.md-slots{position:absolute;inset:5px}
+.md-pill{position:absolute;width:17px;height:9px;border-radius:4.5px;box-sizing:border-box;background:linear-gradient(180deg,rgba(255,255,255,.20) 0%,rgba(255,255,255,0) 52%,rgba(31,35,40,.10) 100%),linear-gradient(90deg,color-mix(in srgb,var(--pc,#9AA1AA) 88%,#9AA5B1) 0 50%,#F1F5F9 50% 100%);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pc,#9AA1AA) 42%,#B4C0CD),0 1px 1.5px rgba(31,35,40,.20);transform:translate(-50%,-50%) rotate(var(--rot,0deg));transition:opacity .24s ease,filter .24s ease;pointer-events:none}
 .md-pill.on{opacity:0;filter:blur(.6px)}
 .md-legend{display:flex;flex-direction:column;gap:1px;min-width:0}
 .md-row{display:flex;align-items:center;gap:2px;min-width:0}
@@ -5302,7 +5302,6 @@ function WaterCard({ ctx }) {
   const got = Math.min(cups, Math.round((water.ml || 0) / 250) || water.count || 0);
   const full = got >= cups || (water.ml || 0) >= 2e3;
   const level = Math.round(Math.min(got, cups) / cups * 100);
-  const on = !(voice && voice.read && voice.read.water === false);
   const list = (Array.isArray(meds) ? meds : []).filter((m) => m && m.name);
   const today = S2.meds && S2.meds.today || {};
   const cntOf = (id) => today[id] && today[id].count || 0;
@@ -5326,21 +5325,6 @@ function WaterCard({ ctx }) {
     /* @__PURE__ */ import_react10.default.createElement("span", { className: "wh-water", style: { height: level + "%" }, "aria-hidden": "true" }),
     full ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "wh-full" }, "满") : null
   ), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-side" }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-num" }, /* @__PURE__ */ import_react10.default.createElement("b", { style: { color: "#3B82C4" } }, got), /* @__PURE__ */ import_react10.default.createElement("span", null, "/ ", cups, " 杯")), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-ml" }, water.ml ? water.ml + " ml" : "还没喝"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-last" }, water.lastAt ? fmtHM2(water.lastAt) + " 喝过" : "一杯 250 ml"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-btns" }, /* @__PURE__ */ import_react10.default.createElement(
-    "button",
-    {
-      type: "button",
-      className: "rh-say wh-say" + (on ? " on" : " dim"),
-      onClick: (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onSay("water");
-      },
-      title: on ? "念一句试试；再点一次就不念喝水" : "喝水不念；点一下开始念",
-      "aria-label": on ? "喝水要念，点一下取消" : "喝水不念，点一下开启",
-      "aria-pressed": on
-    },
-    on ? "🔊" : "🔈"
-  ), /* @__PURE__ */ import_react10.default.createElement(
     "button",
     {
       type: "button",
