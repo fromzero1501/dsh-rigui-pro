@@ -63,7 +63,7 @@ dsh plugin --profile desktop add link:D:/path/to/dsh-rigui-pro
 三路都支持，点页面顶部（问候语右侧）的 **🔊 语音** 打开配置面板（全屏面板：总开关、云端／MiMo／本地切换、哪几类要念、逐项要不要念、日程提前几分钟、播放器与缓存状态）：
 
 - **云端**：任何 OpenAI 兼容的 `/audio/speech`（地址、密钥、模型、音色自填；密钥按你的要求明文落在 `$DSH_HOME/rigui-pro.json`）。
-- **小米 MiMo**：官方标的是限时免费，走的是 chat/completions 形状（不是 `/audio/speech`），所以单开一路；默认 `https://api.xiaomimimo.com/v1` + `mimo-v2.5-tts`，音色可选 `mimo_default`、冰糖、茉莉、苏打、白桦等，要念的文字会放进 `role: assistant` 的消息里。
+- **小米 MiMo**：官方标的是限时免费，走的是 chat/completions 形状（不是 `/audio/speech`），所以单开一路；默认 `https://api.xiaomimimo.com/v1` + `mimo-v2.5-tts`。模型和音色都是下拉框：内置 9 个音色（`mimo_default`、冰糖、茉莉、苏打、白桦、Mia、Chloe、Milo、Dean），另外可以「照我的录音克隆」——在「参考音频」里选一次 `.mp3` / `.wav`，超过 30 秒会自动裁短压小，文件存在本机 `$DSH_HOME/rigui-pro/voices/`；挑到「我的音色」时模型自动切成 `mimo-v2.5-tts-voiceclone`，每次合成把这段录音一起发给 MiMo（服务端不存音色 ID）。要念的文字会放进 `role: assistant` 的消息里。
 - **本地 IndexTTS**：填 Gradio 服务地址（默认 `http://127.0.0.1:7860`）、接口名（默认 `gen_single`）和参考音频；默认发 `["文案","参考音频"]`，接口参数不一样就在「参数模板」里写一个 JSON 数组，用 `{{text}}` / `{{voice}}` 占位。
 
 每件事旁边有个小喇叭：亮着就会念，点一下先听这句，再点一下这件事就不念了。待办和日程念的是「事情标题 + 固定后缀句」，生活琐事念的是固定句池。播放用 ffplay（装个 ffmpeg 就行），同一时刻只响一条；23:30–07:30 只静音生活琐事，待办和日程照念。

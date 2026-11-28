@@ -352,6 +352,7 @@ export default function LifeApp() {
   const [voice, setVoice] = useState(null)
   const [speaking, setSpeaking] = useState(null)
   const [voiceMeta, setVoiceMeta] = useState({ ffplay: false, cache: null })
+  const [voiceSamples, setVoiceSamples] = useState([])
   const [voiceDefaults, setVoiceDefaults] = useState(null)
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [plan, setPlan] = useState({ open: false, busy: false, draft: null, error: '', date: '', text: '' })
@@ -601,6 +602,7 @@ export default function LifeApp() {
       if (r.voice) setVoice(r.voice)
       if (r.defaults) setVoiceDefaults(r.defaults)
       if (typeof r.ffplay === 'boolean') setVoiceMeta({ ffplay: r.ffplay, cache: r.cache || null })
+      if (Array.isArray(r.voices)) setVoiceSamples(r.voices)
       if ('speaking' in r) setSpeaking(r.speaking || null)
       if (j && j.ok === false) say(j.error || '语音没成')
       return j
@@ -611,6 +613,13 @@ export default function LifeApp() {
   }
   const voiceSet = (patch) => runVoice({ action: 'set', voice: patch })
   const voiceTest = () => runVoice({ action: 'test' })
+  // 参考音频：存一段、删一段、听一下；存完把条目回给面板，让它自动选中
+  const voiceAdd = async (payload) => {
+    const j = await runVoice({ action: 'addvoice', ...payload })
+    return j && j.ok !== false && j.result ? j.result.saved : null
+  }
+  const voiceDel = (id) => runVoice({ action: 'delvoice', id })
+  const voiceProbe = (id) => runVoice({ action: 'probevoice', id })
   // 台词试听：直接把这句送去合成播放，不动配置
   const voiceSay = (text) => runVoice({ action: 'say', text: String(text || '').slice(0, 60) })
   // 用哪个模型：列出 DSH 里的模型让用户自己指定，空着就是自动
@@ -1553,6 +1562,7 @@ export default function LifeApp() {
         onAccept={acceptPlan} onReplan={(c) => openPlan(plan.text, c)} />
       <VoicePanel open={voiceOpen} voice={voice ? { ...voice, ffplay: voiceMeta.ffplay, cache: voiceMeta.cache } : null}
         onClose={() => setVoiceOpen(false)} onSave={voiceSet} onTest={voiceTest} onSay={voiceSay} defaults={voiceDefaults}
+        voices={voiceSamples} onAddVoice={voiceAdd} onDelVoice={voiceDel} onPlaySample={voiceProbe}
         onToggleRead={(k, on) => voiceSet({ read: { [k]: on } })}
         onGroup={(g, on) => voiceSet({ groups: { [g]: on } })}
         onLead={(d) => voiceSet({ leadMin: Math.max(0, Math.min(60, Number(voice && voice.leadMin) || 0) + d) })} />

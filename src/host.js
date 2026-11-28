@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { homedir, platform } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 
 export const name = 'dsh-rigui-pro'
@@ -291,7 +291,11 @@ function notify(title, message) {
 // ---------- 语音 ----------
 // 文案固定几句轮换，不每次问模型；合成结果按「配置 + 文案」落盘缓存复用。
 const VOICE_DIR = join(dirname(STORE_FILE), 'rigui-pro', 'voice')
+// 参考音频（克隆用）放在插件数据目录里，不需要服务端的音色 ID
+const SAMPLE_DIR = join(dirname(STORE_FILE), 'rigui-pro', 'voices')
 const MAX_CACHE_FILES = 200
+const MAX_SAMPLE_B64 = 9 * 1024 * 1024 // MiMo 那边 base64 上限 10 MB，留点余量
+const MAX_SAMPLES = 8
 
 const PHRASES = {
   water: ['来，喝口水。', '杯子该续上了。', '喝一杯，顺手记一下。', '水放这儿了，先喝一口。'],
@@ -331,6 +335,8 @@ function voiceDefaults() {
     // 小米 MiMo：OpenAI 的 chat/completions 形状，2026-11 起限时免费
     mimo: { baseUrl: 'https://api.xiaomimimo.com/v1', apiKey: '', model: 'mimo-v2.5-tts', voice: 'mimo_default', format: 'mp3' },
     local: { shape: 'gradio', baseUrl: 'http://127.0.0.1:7860', apiName: 'gen_single', voicePath: '', format: 'wav', payload: '' },
+    // 存下来的参考音频（本机文件，选一次就一直能用）
+    voices: [],
     lastAt: 0,
     lastError: '',
     lastErrorAt: 0,
@@ -349,6 +355,14 @@ function readVoice(store) {
     cloud: { ...d.cloud, ...(raw.cloud || {}) },
     mimo: { ...d.mimo, ...(raw.mimo || {}) },
     local: { ...d.local, ...(raw.local || {}) },
+    // 参考音频清单：只认 id 是字符串的条目，名字截短，最多留 8 段
+    voices: (Array.isArray(raw.voices) ? raw.voices : []).filter((x) => x && typeof x.id === 'string' && x.id).slice(0, MAX_SAMPLES).map((x) => ({
+      id: String(x.id).slice(0, 32),
+      name: String(x.name || '我的音色').replace(/[\r\n\t]/g, ' ').slice(0, 24),
+      ext: String(x.ext || '.mp3').toLowerCase() === '.wav' ? '.wav' : '.mp3',
+      bytes: Number(x.bytes) || 0,
+      at: Number(x.at) || 0,
+    })),
     // 台词只认这 8 类，非字符串/空白一律不收；显式覆盖掉 ...raw 里带进来的脏值
     lines: (() => {
       const out = {}
@@ -369,7 +383,7 @@ const VOICE_FIELDS = {
 }
 
 function mergeVoice(v, patch) {
-  const out = { ...v, read: { ...v.read }, groups: { ...v.groups }, cloud: { ...v.cloud }, mimo: { ...v.mimo }, local: { ...v.local }, lines: { ...(v.lines || {}) } }
+  const out = { ...v, read: { ...v.read }, groups: { ...v.groups }, cloud: { ...v.cloud }, mimo: { ...v.mimo }, local: { ...v.local }, lines: { ...(v.lines || {}) }, voices: Array.isArray(v.voices) ? v.voices.slice() : [] }
   if (!patch || typeof patch !== 'object') return out
   if (typeof patch.enabled === 'boolean') out.enabled = patch.enabled
   if (patch.provider === 'cloud' || patch.provider === 'mimo' || patch.provider === 'local') out.provider = patch.provider
@@ -420,6 +434,89 @@ function voiceDir() {
   return VOICE_DIR
 }
 
+// ---------- 参考音频（克隆用） ----------
+function sampleDir() {
+  try { mkdirSync(SAMPLE_DIR, { recursive: true }) } catch {}
+  return SAMPLE_DIR
+}
+
+// 盘上还在的才算数：文件被删了就不列，免得选了却念不出来
+function sampleList(v) {
+  const out = []
+  for (const x of (v && v.voices) || []) {
+    if (!x || typeof x.id !== 'string') continue
+    const p = join(sampleDir(), x.id + (x.ext || '.mp3'))
+    try {
+      const st = statSync(p)
+      if (st.size > 0) out.push({ id: x.id, name: x.name || x.id, ext: x.ext || '.mp3', bytes: st.size, at: x.at || 0 })
+    } catch {}
+  }
+  return out
+}
+
+// 裁到 30 秒、单声道 24k 转 mp3：原来动辄几 MB 的录音压成两三百 KB，每次克隆就不用背那么大的包
+function trimSample(file, ext) {
+  const ff = ffmpegPath()
+  if (!ff) return { file, ext }
+  const out = file.replace(/\.(mp3|wav)$/i, '') + '-cut.mp3'
+  try {
+    const r = spawnSync(ff, ['-y', '-v', 'error', '-i', file, '-t', '30', '-ac', '1', '-ar', '24000', '-c:a', 'libmp3lame', '-q:a', '6', out], { windowsHide: true, timeout: 25000 })
+    if (r.status === 0 && existsSync(out) && statSync(out).size > 1600) {
+      try { unlinkSync(file) } catch {}
+      return { file: out, ext: '.mp3' }
+    }
+  } catch {}
+  try { if (existsSync(out)) unlinkSync(out) } catch {}
+  return { file, ext }
+}
+
+function saveSample(v, payload) {
+  const raw = String(payload.data || '')
+  if (!raw) throw new Error('没有拿到音频数据')
+  if (raw.length > MAX_SAMPLE_B64) throw new Error('这段录音太大了（' + (raw.length / 1048576).toFixed(1) + ' MB base64），换一段 30 秒以内的')
+  const ext = String(payload.ext || '').toLowerCase() === '.wav' ? '.wav' : '.mp3'
+  const buf = Buffer.from(raw, 'base64')
+  if (buf.length < 1600) throw new Error('这个文件太小了，不像是语音')
+  const id = createHash('sha1').update(buf).digest('hex').slice(0, 12)
+  const dir = sampleDir()
+  const name = String(payload.name || '我的音色').replace(/[\\/:*?"<>|\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 24) || '我的音色'
+  const list = Array.isArray(v.voices) ? v.voices.slice() : []
+  const hit = list.find((x) => x && x.id === id)
+  if (hit) return { entry: { ...hit, name }, added: false }
+  if (list.length >= MAX_SAMPLES) throw new Error('最多存 ' + MAX_SAMPLES + ' 段参考音频，先删掉一段')
+  const tmp = join(dir, 'in-' + id + ext)
+  writeFileSync(tmp, buf)
+  const kept = trimSample(tmp, ext)
+  const final = join(dir, id + kept.ext)
+  try { renameSync(kept.file, final) } catch { writeFileSync(final, readFileSync(kept.file)); try { unlinkSync(kept.file) } catch {} }
+  const entry = { id, name, ext: kept.ext, bytes: statSync(final).size, at: Date.now() }
+  list.push(entry)
+  v.voices = list
+  return { entry, added: true }
+}
+
+function delSample(v, id) {
+  const key = String(id || '')
+  const before = Array.isArray(v.voices) ? v.voices : []
+  v.voices = before.filter((x) => x && x.id !== key)
+  for (const e of ['.mp3', '.wav']) { try { unlinkSync(join(sampleDir(), key + e)) } catch {} }
+  // 删的正是当前在用的那段：退回内置音色，别留一个念不出来的选择
+  if (v.mimo && String(v.mimo.voice) === 'clone:' + key) v.mimo = { ...v.mimo, voice: 'mimo_default', model: 'mimo-v2.5-tts' }
+  return { removed: before.length - v.voices.length }
+}
+
+// 克隆用的是「参考音频的 data URL」，MiMo 每次请求都得带上（服务端不存音色）
+function cloneArg(v, id) {
+  const entry = ((v && v.voices) || []).find((x) => x && x.id === String(id))
+  if (!entry) throw new Error('这个参考音频找不到了，重新选一次文件')
+  const p = join(sampleDir(), entry.id + (entry.ext || '.mp3'))
+  let buf
+  try { buf = readFileSync(p) } catch { throw new Error('参考音频读不出来：' + (entry.name || entry.id)) }
+  if (buf.length * 1.37 > 10 * 1024 * 1024) throw new Error('参考音频太大（MiMo 上限 10 MB base64），换一段短一点的')
+  const mime = (entry.ext || '.mp3') === '.wav' ? 'audio/wav' : 'audio/mpeg'
+  return { url: 'data:' + mime + ';base64,' + buf.toString('base64'), bytes: buf.length, name: entry.name }
+}
+
 function cacheKey(v, text) {
   let src
   if (v.provider === 'local') src = ['local', v.local.shape, v.local.baseUrl, v.local.apiName, v.local.voicePath, text]
@@ -468,17 +565,24 @@ async function synthOpenAI(text, cfg) {
 }
 
 // 小米 MiMo：不是 /audio/speech，走 chat/completions，音频在 choices[0].message.audio.data（base64）
-// 要念的文字必须放在 assistant 消息里；voice 用内置音色名
-async function synthMimo(text, cfg) {
+// 要念的文字必须放在 assistant 消息里；voice 用内置音色名，或者 clone:<id> 走参考音频克隆
+async function synthMimo(text, cfg, v) {
   const base = String(cfg.baseUrl || '').replace(/\/+$/, '')
   if (!base) throw new Error('还没填 MiMo 服务地址')
   const fmt = cfg.format === 'wav' ? 'wav' : 'mp3'
   const headers = { 'content-type': 'application/json' }
   if (cfg.apiKey) { headers.authorization = 'Bearer ' + cfg.apiKey; headers['api-key'] = cfg.apiKey }
+  let model = cfg.model || 'mimo-v2.5-tts'
+  let voice = cfg.voice || 'mimo_default'
+  if (/^clone:/.test(String(voice))) {
+    const c = cloneArg(v, String(voice).slice(6))
+    voice = c.url
+    model = 'mimo-v2.5-tts-voiceclone'
+  }
   const body = {
-    model: cfg.model || 'mimo-v2.5-tts',
+    model,
     messages: [{ role: 'assistant', content: text }],
-    audio: { format: fmt, voice: cfg.voice || 'mimo_default' },
+    audio: { format: fmt, voice },
     stream: false,
   }
   const r = await fetch(base + '/chat/completions', {
@@ -502,7 +606,7 @@ async function synthMimo(text, cfg) {
 
 // 三路合成统一入口
 function synthFor(v, text) {
-  if (v.provider === 'mimo') return synthMimo(text, v.mimo)
+  if (v.provider === 'mimo') return synthMimo(text, v.mimo, v)
   if (v.provider === 'local') return v.local.shape === 'openai' ? synthOpenAI(text, v.local) : synthGradio(text, v.local)
   return synthOpenAI(text, v.cloud)
 }
@@ -1469,7 +1573,7 @@ export function apply(ctx) {
       const action = p.action || 'get'
       if (action === 'get') {
         const sp = saying ? { id: saying.id, text: saying.text, preparing: !!saying.preparing, since: saying.since } : null
-        return { ok: true, result: { voice: v, defaults: defaultLines(), ffplay: !!ffplayPath(), cache: cacheStat(), playing: !!playing, speaking: sp } }
+        return { ok: true, result: { voice: v, defaults: defaultLines(), ffplay: !!ffplayPath(), cache: cacheStat(), playing: !!playing, speaking: sp, voices: sampleList(v), maxSample: MAX_SAMPLE_B64 } }
       }
       if (action === 'set') {
         const next = mergeVoice(v, p.voice)
@@ -1479,7 +1583,33 @@ export function apply(ctx) {
         store.voice = next
         save()
         warmUpcoming() // 换了配置，缓存全作废，后台重新备一遍
-        return { ok: true, result: { voice: next, defaults: defaultLines(), ffplay: !!ffplayPath(), cache: cacheStat() } }
+        return { ok: true, result: { voice: next, defaults: defaultLines(), ffplay: !!ffplayPath(), cache: cacheStat(), voices: sampleList(next) } }
+      }
+      // 存一段参考音频：选一次文件，之后选中它就一直带
+      if (action === 'addvoice') {
+        try {
+          const got = saveSample(v, p)
+          store.voice = v
+          save()
+          warmUpcoming()
+          return { ok: true, result: { saved: got.entry, added: got.added, voice: v, voices: sampleList(v) } }
+        } catch (e) {
+          return { ok: false, error: String((e && e.message) || e) }
+        }
+      }
+      if (action === 'delvoice') {
+        const r = delSample(v, p.id)
+        store.voice = v
+        save()
+        warmUpcoming()
+        return { ok: true, result: { removed: r.removed, voice: v, voices: sampleList(v) } }
+      }
+      // 试听这段参考音频本身，确认录的是想要的那把嗓子
+      if (action === 'probevoice') {
+        const e = sampleList(v).find((x) => x.id === String(p.id || ''))
+        if (!e) return { ok: false, error: '这段参考音频不在了' }
+        startPlay(join(sampleDir(), e.id + e.ext))
+        return { ok: true, result: { playing: e.name, file: join(sampleDir(), e.id + e.ext) } }
       }
       if (action === 'say' || action === 'test') {
         const kind = String(p.kind || '').slice(0, 16)

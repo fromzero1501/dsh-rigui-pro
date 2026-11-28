@@ -1,7 +1,7 @@
 // 日晷 Pro · 语音设置面板
 // 独立全屏面板：总开关、云端 / 本地两路 TTS、逐事项要不要念、播放器与缓存状态。
 // 之前塞在「日常」卡背面装不下（卡高 336px，内容 600px），挪出来才够用。
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { routineName } from './habits.js'
 
 // 上次出错的时间戳 -> 「11-28 00:34」；今天发生的只显示钟点，免得看成一串数字
@@ -49,6 +49,10 @@ const CSS = `
 .rv-btn.sm{height:26px;min-width:26px;padding:0 8px;border-radius:8px;font-size:13px;line-height:1}
 .rv-num{min-width:56px;text-align:center;font-variant-numeric:tabular-nums;font-size:13px}
 .rv-row .rh-inline{display:inline-flex;align-items:center;gap:6px}
+.rv-smp{flex:1;min-width:0;font-size:13px;color:var(--ink2,#6B7280);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rv-sel{flex:1;min-width:0;height:36px;padding:0 8px;border-radius:10px;border:1px solid var(--rule,rgba(31,35,40,.16));background:var(--card,#fff);color:inherit;font:inherit;font-size:13.5px}
+.rv-sel:focus{outline:2px solid rgba(242,153,74,.5);outline-offset:-1px}
+.rv-hit{font-size:12.5px;color:var(--ink2,#6B7280);padding:2px 0 0 90px}
 `
 
 const READ_KINDS = ['water', 'shower', 'hair', 'meal', 'sleep']
@@ -64,15 +68,25 @@ const blank = (v) => ({
 })
 
 const MIMO_VOICES = ['mimo_default', '冰糖', '茉莉', '苏打', '白桦', 'Mia', 'Chloe', 'Milo', 'Dean']
+const MIMO_MODELS = [
+  ['mimo-v2.5-tts', '内置音色'],
+  ['mimo-v2.5-tts-voiceclone', '照我的录音克隆'],
+]
+const MIMO_VOICE_NAME = (id) => {
+  const hit = MIMO_VOICES.find((x) => x === id)
+  return hit || id
+}
 
-export default function VoicePanel({ open, voice, onClose, onSave, onTest, onToggleRead, onGroup, onLead, onSay, defaults }) {
+export default function VoicePanel({ open, voice, onClose, onSave, onTest, onToggleRead, onGroup, onLead, onSay, defaults, voices, onAddVoice, onDelVoice, onPlaySample }) {
   const v = voice || {}
   const [d, setD] = useState(() => blank(v))
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [addMsg, setAddMsg] = useState('')
+  const fileRef = useRef(null)
 
   // 只在打开那一下读进已存配置：试听会刷新 voice.lastAt，别因此冲掉正在输入的台词
-  useEffect(() => { if (open) { setD(blank(voice)); setMsg('') } }, [open])
+  useEffect(() => { if (open) { setD(blank(voice)); setMsg(''); setAddMsg('') } }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -84,6 +98,9 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
   const enabled = !!v.enabled
   const provider = v.provider === 'local' ? 'local' : (v.provider === 'mimo' ? 'mimo' : 'cloud')
   const localShape = d.local.shape || 'gradio'
+  const samples = Array.isArray(voices) ? voices : (Array.isArray(v.voices) ? v.voices : [])
+  const curVoice = String(d.mimo.voice || 'mimo_default')
+  const voiceKnown = MIMO_VOICES.includes(curVoice) || /^clone:/.test(curVoice)
   const ready = useMemo(() => {
     if (provider === 'cloud') return !!(d.cloud.baseUrl && d.cloud.apiKey)
     if (provider === 'mimo') return !!(d.mimo.baseUrl && d.mimo.apiKey)
@@ -103,6 +120,40 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
     } finally { setBusy(false) }
   }
   const test = () => { if (onTest) onTest() }
+  // 选音色：挑到「我的音色」就自动切到克隆模型，挑回内置音色就切回普通模型
+  const pickVoice = (val) => {
+    const clone = /^clone:/.test(val)
+    setD((x) => ({
+      ...x,
+      mimo: {
+        ...x.mimo,
+        voice: val,
+        model: clone ? 'mimo-v2.5-tts-voiceclone' : (x.mimo.model === 'mimo-v2.5-tts-voiceclone' ? 'mimo-v2.5-tts' : x.mimo.model),
+        format: clone ? 'mp3' : x.mimo.format,
+      },
+    }))
+  }
+  // 选一段录音存进插件目录；存完自动选中它
+  const pickFile = async (e) => {
+    const f = e.target.files && e.target.files[0]
+    try { e.target.value = '' } catch {}
+    if (!f) return
+    const ext = /\.wav$/i.test(f.name) ? '.wav' : '.mp3'
+    setAddMsg('在读这个文件…')
+    const dataUrl = await new Promise((res) => {
+      const rd = new FileReader()
+      rd.onload = () => res(String(rd.result || ''))
+      rd.onerror = () => res('')
+      rd.readAsDataURL(f)
+    })
+    const b64 = dataUrl.split(',').pop() || ''
+    if (!b64) { setAddMsg('这个文件读不出来，换一段 mp3 或 wav'); return }
+    setAddMsg('在存…')
+    const got = onAddVoice ? await onAddVoice({ name: f.name.replace(/\.[^.]+$/, ''), ext, data: b64 }) : null
+    if (!got) { setAddMsg('没存上，看下面那条错误'); return }
+    setD((x) => ({ ...x, mimo: { ...x.mimo, voice: 'clone:' + got.id, model: 'mimo-v2.5-tts-voiceclone', format: 'mp3' } }))
+    setAddMsg('存好了：' + (got.name || '我的音色') + '，点保存生效')
+  }
   // 试听一条台词：输入框里改了还没保存也能听，空着就念内置的第一句
   const sayLine = (k) => {
     const t = String((d.lines && d.lines[k]) || '').trim() || String((defaults && defaults[k]) || '')
@@ -151,8 +202,40 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
             <>
               <div className="rv-row"><span className="n">地址</span><input className="rv-in" value={d.mimo.baseUrl || ''} onChange={(e) => setField('mimo', 'baseUrl', e.target.value)} placeholder="https://api.xiaomimimo.com/v1" /></div>
               <div className="rv-row"><span className="n">密钥</span><input className="rv-in" value={d.mimo.apiKey || ''} onChange={(e) => setField('mimo', 'apiKey', e.target.value)} placeholder="MiMo 的 API Key（明文存在本机 rigui-pro.json）" /></div>
-              <div className="rv-row"><span className="n">模型</span><input className="rv-in" value={d.mimo.model || ''} onChange={(e) => setField('mimo', 'model', e.target.value)} placeholder="mimo-v2.5-tts" /></div>
-              <div className="rv-row"><span className="n">音色</span><input className="rv-in" value={d.mimo.voice || ''} onChange={(e) => setField('mimo', 'voice', e.target.value)} placeholder={MIMO_VOICES.join(' / ')} /></div>
+              <div className="rv-row"><span className="n">模型</span>
+                <select className="rv-sel" value={d.mimo.model || 'mimo-v2.5-tts'} onChange={(e) => setField('mimo', 'model', e.target.value)} aria-label="MiMo 模型">
+                  {MIMO_MODELS.map(([id, label]) => <option key={id} value={id}>{label}（{id}）</option>)}
+                  {MIMO_MODELS.some(([id]) => id === (d.mimo.model || 'mimo-v2.5-tts')) ? null : <option value={d.mimo.model}>{d.mimo.model}</option>}
+                </select>
+              </div>
+              <div className="rv-row"><span className="n">音色</span>
+                <select className="rv-sel" value={curVoice} onChange={(e) => pickVoice(e.target.value)} aria-label="音色">
+                  <optgroup label="内置音色">
+                    {MIMO_VOICES.map((x) => <option key={x} value={x}>{MIMO_VOICE_NAME(x)}</option>)}
+                  </optgroup>
+                  {samples.length ? (
+                    <optgroup label="我的音色（照录音克隆）">
+                      {samples.map((s) => <option key={s.id} value={'clone:' + s.id}>{s.name}</option>)}
+                    </optgroup>
+                  ) : null}
+                  {voiceKnown ? null : <option value={curVoice}>{curVoice}</option>}
+                </select>
+              </div>
+              <div className="rv-row">
+                <span className="n">参考音频</span>
+                <span className="rv-smp">{samples.length ? '挑到「我的音色」就会自动带上它' : '还没存过录音'}</span>
+                <button type="button" className="rv-btn sm" onClick={() => fileRef.current && fileRef.current.click()} aria-label="选一段录音当参考音频">＋ 选文件</button>
+                <input ref={fileRef} type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" onChange={pickFile} style={{ display: 'none' }} aria-hidden="true" tabIndex={-1} />
+              </div>
+              {samples.map((s) => (
+                <div className="rv-row" key={s.id}>
+                  <span className="n" />
+                  <span className="rv-smp">{s.name} · {Math.max(1, Math.round(s.bytes / 1024))} KB</span>
+                  <button type="button" className="rv-btn sm" onClick={() => onPlaySample && onPlaySample(s.id)} aria-label={'试听 ' + s.name} title="听一下这段录音">▶</button>
+                  <button type="button" className="rv-btn sm" onClick={() => onDelVoice && onDelVoice(s.id)} aria-label={'删掉 ' + s.name} title="删掉这段录音">删</button>
+                </div>
+              ))}
+              {addMsg ? <div className="rv-hit">{addMsg}</div> : null}
               <div className="rv-row"><span className="n">格式</span>
                 <span className="rv-seg">
                   {['mp3', 'wav'].map((f) => (
@@ -160,7 +243,8 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
                   ))}
                 </span>
               </div>
-              <p className="rv-note">小米 MiMo 的三个语音模型官方标的是限时免费；内置音色 {MIMO_VOICES.length} 个（{MIMO_VOICES.join('、')}），中文那四个是普通话。它走 chat/completions 而不是 /audio/speech，所以单开一路。</p>
+              <p className="rv-note">小米 MiMo 的语音模型官方标的是限时免费；内置音色 {MIMO_VOICES.length} 个（{MIMO_VOICES.join('、')}）。它走 chat/completions 而不是 /audio/speech，所以单开一路。</p>
+              <p className="rv-note">「我的音色」是照你的录音克隆：文件存在本机插件目录，选一次就一直能用；每次合成会把这段录音一起发给 MiMo（服务端不存音色 ID），超过 30 秒会自动裁短压小。</p>
             </>
           ) : (
             <>
