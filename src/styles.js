@@ -68,6 +68,11 @@ ${SKY_CSS}
 .lf-widget{display:flex;flex-direction:column;overflow:hidden;padding:0}
 .lf-widget>.lf-widget-body{padding:20px 22px;flex:auto;min-height:0;display:flex;flex-direction:column}
 .lf-widget>.lf-widget-body>*:only-child{flex:auto}
+.lf-widget>.lf-widget-body.lf-backface{overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(31,35,40,.2) transparent;padding-bottom:20px}
+.lf-widget>.lf-widget-body.lf-backface>*{flex:0 0 auto}
+.lf-widget>.lf-widget-body.lf-backface::-webkit-scrollbar{width:7px}
+.lf-widget>.lf-widget-body.lf-backface::-webkit-scrollbar-thumb{background:rgba(31,35,40,.16);border-radius:4px}
+.lf-widget>.lf-widget-body.lf-backface::-webkit-scrollbar-track{background:transparent}
 .lf-widget.clip::after{content:'';position:absolute;left:0;right:0;bottom:0;height:44px;background:linear-gradient(to bottom,transparent,var(--bgc));pointer-events:none;border-radius:0 0 28px 28px}
 .lf-grip,.lf-resize{position:absolute;z-index:3;border:0;display:flex;align-items:center;justify-content:center;color:currentColor;opacity:0;transition:opacity .2s,background .2s,transform .2s;touch-action:none}
 .lf-grip{top:3px;left:50%;margin-left:-32px;width:64px;height:20px;border-radius:10px;background:transparent;cursor:grab}

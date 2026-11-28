@@ -53,10 +53,18 @@ const CSS = `
 .rh-act.away{color:var(--ink3,#9AA0A6)}
 .rh-act.away i{background:#C9CDD2}
 .rh-act b{font-weight:600}
-.rh-rule{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--rule,rgba(31,35,40,.07))}
+.rh-rule{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 10px;padding:9px 0;border-bottom:1px solid var(--rule,rgba(31,35,40,.07))}
 .rh-rule:last-child{border-bottom:0}
-.rh-rule .n{flex:1;font-size:13.5px}
+.rh-rule .n{font-size:13.5px}
 .rh-rule .t{font-size:12px;color:var(--ink2,#6B7280);font-variant-numeric:tabular-nums}
+.rh-ctl{grid-column:1/-1;display:flex;align-items:center;flex-wrap:wrap;gap:5px}
+.rh-time{height:26px;padding:0 3px;border-radius:8px;border:1px solid var(--rule,rgba(31,35,40,.14));background:transparent;color:inherit;font:inherit;font-size:12px;font-variant-numeric:tabular-nums;cursor:pointer;min-width:80px}
+.rh-time:hover{background:rgba(31,35,40,.05)}
+.rh-time:focus-visible{outline:2px solid rgba(59,130,196,.45);outline-offset:1px}
+.rh-timewrap{display:inline-flex;align-items:center;gap:2px}
+.rh-winline{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--ink2,#6B7280)}
+.rh-drop{width:20px;height:20px;flex:none;border-radius:6px;border:0;background:transparent;color:var(--ink3,#9AA0A6);font:inherit;font-size:12px;line-height:1;cursor:pointer;padding:0}
+.rh-drop:hover{background:rgba(155,28,32,.1);color:var(--warn-ink,#9B1C20)}
 .rh-step{width:24px;height:24px;border-radius:8px;border:1px solid var(--rule,rgba(31,35,40,.14));background:transparent;color:inherit;font:inherit;line-height:1;cursor:pointer;font-size:14px}
 .rh-sw{width:38px;height:22px;border-radius:11px;border:0;background:var(--rule,rgba(31,35,40,.16));position:relative;cursor:pointer;flex:none;transition:background .18s ease}
 .rh-sw.on{background:#1E9E6A}
@@ -223,41 +231,69 @@ export function WaterCard({ ctx }) {
 }
 
 // 背面只剩提醒节奏；语音那套搬到独立面板（src/voice.jsx），入口在页面顶部。
-export function BackRoutine({ rules, onToggle, onEvery, onGap, onSit }) {
+export function BackRoutine({ rules, onToggle, onEvery, onGap, onSit, onTime, onAddTime }) {
   return (
     <>
       <style>{CSS}</style>
       <h2 className="lf-h" style={{ marginBottom: 8 }}>提醒怎么设</h2>
       <div className="rh-rules">
-        {(rules || []).map((r) => (
-          <div className="rh-rule" key={r.id}>
-            <span className="n">{r.title}</span>
-            {r.mode === 'interval' ? (
-              <span className="lf-row" style={{ gap: 4 }}>
-                <button type="button" className="rh-step" onClick={() => onEvery(r.id, -15)} aria-label="少十五分钟">−</button>
-                <span className="t">{r.everyMin} 分钟</span>
-                <button type="button" className="rh-step" onClick={() => onEvery(r.id, 15)} aria-label="多十五分钟">+</button>
-              </span>
-            ) : r.mode === 'gap' ? (
-              <span className="lf-row" style={{ gap: 4 }}>
-                <button type="button" className="rh-step" onClick={() => onGap(r.id, -1)} aria-label="少一天">−</button>
-                <span className="t">{r.minGapDays} 天</span>
-                <button type="button" className="rh-step" onClick={() => onGap(r.id, 1)} aria-label="多一天">+</button>
-              </span>
-            ) : r.mode === 'sit' ? (
-              <span className="lf-row" style={{ gap: 4 }}>
-                <button type="button" className="rh-step" onClick={() => onSit(r.id, -10)} aria-label="少十分钟">−</button>
-                <span className="t">坐 {r.afterMin} 分钟</span>
-                <button type="button" className="rh-step" onClick={() => onSit(r.id, 10)} aria-label="多十分钟">+</button>
-              </span>
-            ) : (
-              <span className="t">{(r.times || []).join(' · ')}</span>
-            )}
-            <button type="button" className={'rh-sw' + (r.enabled !== false ? ' on' : '')} onClick={() => onToggle(r.id)} aria-label={r.enabled !== false ? '关掉' : '打开'} aria-pressed={r.enabled !== false} />
-          </div>
-        ))}
+        {(rules || []).map((r) => {
+          const times = Array.isArray(r.times) ? r.times : []
+          return (
+            <div className="rh-rule" key={r.id}>
+              <span className="n">{r.title}</span>
+              <button type="button" className={'rh-sw' + (r.enabled !== false ? ' on' : '')} onClick={() => onToggle(r.id)} aria-label={r.enabled !== false ? '关掉' : '打开'} aria-pressed={r.enabled !== false} />
+              <div className="rh-ctl">
+                {r.mode === 'interval' ? (
+                  <>
+                    <span className="lf-row" style={{ gap: 4 }}>
+                      <button type="button" className="rh-step" onClick={() => onEvery(r.id, -15)} aria-label="少十五分钟">−</button>
+                      <span className="t">{r.everyMin} 分钟</span>
+                      <button type="button" className="rh-step" onClick={() => onEvery(r.id, 15)} aria-label="多十五分钟">+</button>
+                    </span>
+                    <span className="rh-winline">
+                      <input type="time" className="rh-time" value={r.from || '09:00'} onChange={(e) => onTime(r.id, { from: e.target.value, to: r.to || '21:00' })} aria-label={r.title + ' 从几点开始'} />
+                      <span>到</span>
+                      <input type="time" className="rh-time" value={r.to || '21:00'} onChange={(e) => onTime(r.id, { from: r.from || '09:00', to: e.target.value })} aria-label={r.title + ' 到几点结束'} />
+                    </span>
+                  </>
+                ) : r.mode === 'gap' ? (
+                  <>
+                    <span className="lf-row" style={{ gap: 4 }}>
+                      <button type="button" className="rh-step" onClick={() => onGap(r.id, -1)} aria-label="少一天">−</button>
+                      <span className="t">{r.minGapDays} 天</span>
+                      <button type="button" className="rh-step" onClick={() => onGap(r.id, 1)} aria-label="多一天">+</button>
+                    </span>
+                    <input type="time" className="rh-time" value={r.at || '22:30'} onChange={(e) => onTime(r.id, { at: e.target.value })} aria-label={r.title + ' 几点提醒'} />
+                  </>
+                ) : r.mode === 'sit' ? (
+                  <span className="lf-row" style={{ gap: 4 }}>
+                    <button type="button" className="rh-step" onClick={() => onSit(r.id, -10)} aria-label="少十分钟">−</button>
+                    <span className="t">坐 {r.afterMin} 分钟</span>
+                    <button type="button" className="rh-step" onClick={() => onSit(r.id, 10)} aria-label="多十分钟">+</button>
+                  </span>
+                ) : (
+                  <>
+                    {times.map((t, i) => (
+                      <span className="rh-timewrap" key={i}>
+                        <input type="time" className="rh-time" value={t} aria-label={r.title + ' 第 ' + (i + 1) + ' 个时间'}
+                          onChange={(e) => { const nx = times.slice(); nx[i] = e.target.value; onTime(r.id, { times: nx }) }} />
+                        {times.length > 1 ? (
+                          <button type="button" className="rh-drop" onClick={() => onTime(r.id, { times: times.filter((_, k) => k !== i) })} aria-label={'删掉 ' + r.title + ' 第 ' + (i + 1) + ' 个时间'}>−</button>
+                        ) : null}
+                      </span>
+                    ))}
+                    {times.length < 4 ? (
+                      <button type="button" className="rh-step" onClick={() => onAddTime(r.id)} aria-label={'给 ' + r.title + ' 加一个时间'}>+</button>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
-      <p className="rh-note">点一下就记下，记完自动顺延；面板关着也会弹系统提醒。待办和日程到点同样会提醒。</p>
+      <p className="rh-note">时间点可以直接改，改完立刻按新时刻算；点一下就记下，记完自动顺延。面板关着也会弹系统提醒，待办和日程到点同样会提醒。</p>
     </>
   )
 }

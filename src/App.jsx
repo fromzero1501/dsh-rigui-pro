@@ -275,7 +275,7 @@ function Card({ id, cls = '', bg, color, refs, flash, armed, hl, dim, children, 
       className={['lf-card', back ? 'has-back' : '', entered ? '' : 'lf-enter', W ? 'lf-widget' : cls, armed ? 'armed' : '', hl ? 'hl' : '', dim ? 'dim' : '', clip ? 'clip' : '', dragging ? 'lf-lifted' : ''].join(' ')}
       style={Object.assign({ background: bg, color, '--c': CARD_COLOR[id] || '#1F2328', '--bgc': bg || 'var(--card)', '--sheen-c': color && color !== '#1F2328' ? 'rgba(255,255,255,.2)' : undefined, animationDelay: 0.15 + idx * 0.05 + 's' },
         lay ? { gridColumn: 'span ' + lay.span, gridRow: 'span ' + lay.h, order: lay.order } : null, W ? null : style)}>
-      {W ? <div className="lf-widget-body" style={style}><FlipCtx.Provider value={flip}>{face && back ? back : children}</FlipCtx.Provider></div> : (face && back ? back : children)}
+      {W ? <div className={'lf-widget-body' + (face && back ? ' lf-backface' : '')} style={style}><FlipCtx.Provider value={flip}>{face && back ? back : children}</FlipCtx.Provider></div> : (face && back ? back : children)}
       {W && back && <button type="button" className="lf-flip" aria-label={face ? '翻回正面' : '翻到背面，看看怎么算的'} title={face ? '翻回去' : '看看怎么算的'} onClick={flip}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" /><path d="M4 3v5h5" /><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" /><path d="M20 21v-5h-5" /></svg>
       </button>}
@@ -376,6 +376,10 @@ export default function LifeApp() {
     const root = rootRef.current; if (!root) return
     let t, on = false
     const onWheel = (e) => {
+      // 卡片背面是长内容：滚轮先给它自己用，滚到底再让浏览器接给整页。
+      // 这里必须直接放行——一旦进「滚动中」状态，外层的 pointer-events 会被关掉，
+      // 滚轮就会当场改道去滚整页，手一停卡片位置已经跑了。
+      if (e.target.closest && e.target.closest('.lf-backface')) return
       // 卡片里自己能滚的列表（待办、归档）：让它自己滚，不去挡指针
       const inner = e.target.closest && e.target.closest('.lf-inner-scroll')
       if (inner && inner.scrollHeight > inner.clientHeight + 1) {
@@ -783,6 +787,38 @@ export default function LifeApp() {
   const bumpEvery = (id, d) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, everyMin: Math.max(15, Math.min(720, (r.everyMin || 90) + d)) } : r)))
   const bumpGap = (id, d) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, minGapDays: Math.max(1, Math.min(30, (r.minGapDays || 3) + d)) } : r)))
   const bumpSit = (id, d) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, afterMin: Math.max(15, Math.min(180, (r.afterMin || 50) + d)) } : r)))
+  // 时刻直接改：只认 24 小时的时分，填坏了就不落盘，界面自己弹回原值
+  const setRuleTime = (id, patch) => {
+    const ok = (t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(t || ''))
+    if ('times' in patch) {
+      const times = (patch.times || []).filter(ok)
+      if (!times.length) { say('至少留一个时间'); return }
+      const uniq = [...new Set(times)].sort()
+      setRules((rs) => rs.map((r) => (r.id === id ? { ...r, times: uniq } : r)))
+      return
+    }
+    if ('at' in patch) {
+      if (!ok(patch.at)) return
+      setRules((rs) => rs.map((r) => (r.id === id ? { ...r, at: patch.at } : r)))
+      return
+    }
+    if ('from' in patch || 'to' in patch) {
+      const from = patch.from, to = patch.to
+      if (!ok(from) || !ok(to)) return
+      if (from >= to) { say('从的时间要早于到的时间'); return }
+      setRules((rs) => rs.map((r) => (r.id === id ? { ...r, from, to } : r)))
+    }
+  }
+  // 加一个时间点：按最后一个往后推一小时，绕回 00–23
+  const addRuleTime = (id) => setRules((rs) => rs.map((r) => {
+    if (r.id !== id) return r
+    const times = Array.isArray(r.times) ? r.times.slice() : []
+    if (times.length >= 4) return r
+    const base = times.length ? times[times.length - 1] : '08:00'
+    const [h, m] = String(base).split(':')
+    const nh = String(((parseInt(h, 10) || 8) + 1) % 24).padStart(2, '0')
+    return { ...r, times: [...times, nh + ':' + (m || '00')].sort() }
+  }))
 
   // ===== AI 建议：一天几次就够，别唠叨 =====
   useEffect(() => {
@@ -1334,7 +1370,7 @@ export default function LifeApp() {
           <NextCard P={P} S={S} onDone={doneEvent} />
 
           {/* 日常：喝水、洗澡、洗头 */}
-          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} onSit={bumpSit} />}>
+          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} onSit={bumpSit} onTime={setRuleTime} onAddTime={addRuleTime} />}>
             <RoutineCard ctx={{ S, rules, onLog: logRoutine, next: reminderNext, voice, onSay: sayRoutine, act: activity }} />
             {coachLines[0] ? <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink2)' }}>AI · {coachLines[0]}</div> : null}
           </Card>
