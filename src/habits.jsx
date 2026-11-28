@@ -2,7 +2,7 @@
 // 一张卡管住「喝水、吃饭、洗澡、洗头、睡觉」：今天做了几次、上一次是几点、下一次什么时候提醒。
 // 点一下就记下，不做二次确认；记完提醒自动往后顺延。
 // 每件事旁边一个小喇叭：点一下当场念这句（试听），同时决定这件事要不要念。
-import React, { useMemo } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import { ROUTINE, routineName, fmtHM, pad2 } from './habits.js'
 
 const CSS = `
@@ -40,6 +40,30 @@ const CSS = `
 .wh-say{margin-top:0;align-self:auto}
 .wh-minus{width:27px;height:27px;flex:none;border-radius:9px;border:1px solid var(--rule,rgba(31,35,40,.12));background:transparent;color:var(--ink2,#6B7280);font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:0}
 .wh-minus:disabled{opacity:.35;cursor:default}
+.md-pot{position:relative;flex:none;width:44px;height:98px;display:flex;flex-direction:column;align-items:center}
+.md-cap{width:24px;height:8px;border-radius:3px 3px 1px 1px;background:rgba(31,35,40,.2);flex:none}
+.md-body{flex:1;width:100%;margin-top:1px;border:2px solid rgba(31,35,40,.2);border-radius:5px 5px 9px 9px;background:linear-gradient(to bottom,rgba(255,255,255,.65),rgba(31,35,40,.04));padding:5px 3px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.md-pot.empty .md-body{border-style:dashed;opacity:.5}
+.md-slots{display:flex;flex-direction:column;gap:3px;overflow-y:auto;scrollbar-width:none;min-height:0}
+.md-slots::-webkit-scrollbar{width:0;height:0}
+.md-med{display:flex;flex-wrap:wrap;gap:2px;justify-content:center;padding:1px 0}
+.md-pill{position:relative;width:8px;height:8px;padding:0;border:0;border-radius:50%;background:var(--pc,#3B82C4);opacity:.9;cursor:pointer;transition:opacity .12s ease}
+.md-pill::after{content:"";position:absolute;inset:-4px}
+.md-pill:hover{opacity:1}
+.md-pill.on{background:transparent;border:1.5px solid var(--pc,#3B82C4);opacity:.45;box-sizing:border-box}
+.md-legend{display:flex;flex-direction:column;gap:2px;margin-top:2px;min-width:0}
+.md-row{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink2,#6B7280);line-height:1.35;min-width:0}
+.md-dot{width:6px;height:6px;border-radius:50%;flex:none}
+.md-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.md-cnt{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink,#1F2328)}
+.md-cnt.done{color:#1E9E6A}
+.md-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.md-edit{display:flex;align-items:center;gap:6px}
+.md-input{flex:1;min-width:0;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--rule,rgba(31,35,40,.14));background:transparent;color:inherit;font:inherit;font-size:13px}
+.md-input:focus-visible{outline:2px solid rgba(59,130,196,.45);outline-offset:1px}
+.md-step{display:inline-flex;align-items:center;gap:4px;flex:none}
+.md-step .t{font-size:12px;color:var(--ink2,#6B7280);font-variant-numeric:tabular-nums;min-width:28px;text-align:center}
+.md-add{margin-top:8px;align-self:flex-start}
 .rh-line{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--ink2,#6B7280);margin-top:8px}
 .rh-next{display:flex;align-items:center;gap:6px}
 .rh-dot{width:6px;height:6px;border-radius:50%;background:#1E9E6A;flex:none;animation:rh-blink 2s ease-in-out infinite}
@@ -173,20 +197,27 @@ export function RoutineCard({ ctx }) {
 }
 
 // 喝水：一张卡就是一只杯子，点一次水位往上走一格，满 8 杯停在满格。
+// 旁边一只药瓶：一种药一排，一天几次就几颗药丸；点一颗算吃了一次，吃够了再点就撤回来。
+const MED_COLORS = ['#E2604C', '#3B82C4', '#1E9E6A', '#8B6BD9', '#D9963A', '#4C8C8C']
+
 export function WaterCard({ ctx }) {
-  const { S, onLog, onMinus, onSay, voice } = ctx
+  const { S, onLog, onMinus, onSay, voice, meds, onMed, onMedUndo } = ctx
   const water = (S.routines && S.routines.today && S.routines.today.water) || { count: 0, ml: 0, lastAt: 0 }
   const cups = 8
   const got = Math.min(cups, Math.round((water.ml || 0) / 250) || water.count || 0)
   const full = got >= cups || (water.ml || 0) >= 2000
   const level = Math.round((Math.min(got, cups) / cups) * 100)
   const on = !(voice && voice.read && voice.read.water === false)
+  const list = (Array.isArray(meds) ? meds : []).filter((m) => m && m.name)
+  const today = (S.meds && S.meds.today) || {}
+  const cntOf = (id) => (today[id] && today[id].count) || 0
+  const allDone = list.length > 0 && list.every((m) => cntOf(m.id) >= m.times)
   return (
     <>
       <style>{CSS}</style>
       <div className="lf-row" style={{ justifyContent: 'space-between', marginBottom: 2 }}>
-        <h2 className="lf-h">喝水</h2>
-        <span className="lf-sub">{full ? '今天喝够了' : '点一下杯子加一杯'}</span>
+        <h2 className="lf-h">喝水吃药</h2>
+        <span className="lf-sub">{allDone ? '今天的药吃完了' : list.length ? '点药丸记一次' : (full ? '今天喝够了' : '点一下杯子加一杯')}</span>
       </div>
       <div className="wh-wrap">
         <button
@@ -201,10 +232,51 @@ export function WaterCard({ ctx }) {
           <span className="wh-water" style={{ height: level + '%' }} aria-hidden="true" />
           {full ? <span className="wh-full">满</span> : null}
         </button>
+        <div className={'md-pot' + (list.length ? '' : ' empty')}>
+          <span className="md-cap" aria-hidden="true" />
+          <span className="md-body">
+            {list.length ? (
+              <span className="md-slots">
+                {list.map((m, i) => {
+                  const c = cntOf(m.id)
+                  return (
+                    <span className="md-med" key={m.id}>
+                      {Array.from({ length: m.times }).map((_, k) => (
+                        <button
+                          key={k}
+                          type="button"
+                          className={'md-pill' + (k < c ? ' on' : '')}
+                          style={{ '--pc': MED_COLORS[i % MED_COLORS.length] }}
+                          onClick={() => (c >= m.times ? onMedUndo(m) : onMed(m))}
+                          title={c >= m.times ? m.name + ' 今天吃够了，点一下撤回来' : m.name + '：点一颗记一次（' + c + '/' + m.times + '）'}
+                          aria-label={m.name + ' 第 ' + Math.min(c + 1, m.times) + ' 次，共 ' + m.times + ' 次'}
+                        />
+                      ))}
+                    </span>
+                  )
+                })}
+              </span>
+            ) : null}
+          </span>
+        </div>
         <div className="wh-side">
           <div className="wh-num"><b style={{ color: '#3B82C4' }}>{got}</b><span>/ {cups} 杯</span></div>
           <div className="wh-ml">{water.ml ? water.ml + ' ml' : '还没喝'}</div>
           <div className="wh-last">{water.lastAt ? fmtHM(water.lastAt) + ' 喝过' : '一杯 250 ml'}</div>
+          {list.length ? (
+            <div className="md-legend">
+              {list.map((m, i) => {
+                const c = cntOf(m.id)
+                return (
+                  <div className="md-row" key={m.id}>
+                    <i className="md-dot" style={{ background: MED_COLORS[i % MED_COLORS.length] }} aria-hidden="true" />
+                    <span className="md-name">{m.name}</span>
+                    <b className={'md-cnt' + (c >= m.times ? ' done' : '')}>{c}/{m.times}</b>
+                  </div>
+                )
+              })}
+            </div>
+          ) : <div className="wh-last">背面加药</div>}
           <div className="wh-btns">
             <button
               type="button"
@@ -230,6 +302,47 @@ export function WaterCard({ ctx }) {
   )
 }
 
+// 喝水卡背面：一种药一行，写名字、定一天几次；药丸数量跟着次数走，删掉这种药，药丸就一起没了
+export function BackWaterMeds({ meds, onChange }) {
+  const [local, setLocal] = useState(() => (Array.isArray(meds) ? meds : []))
+  useEffect(() => { setLocal(Array.isArray(meds) ? meds : []) }, [meds])
+  const commit = (next) => { setLocal(next); onChange(next) }
+  const patch = (id, kv) => commit(local.map((m) => (m.id === id ? { ...m, ...kv } : m)))
+  const del = (id) => commit(local.filter((m) => m.id !== id))
+  const add = () => commit([...local, { id: 'm' + Date.now().toString(36), name: '新药', times: 1 }])
+  return (
+    <>
+      <style>{CSS}</style>
+      <h2 className="lf-h" style={{ marginBottom: 6 }}>吃什么药</h2>
+      <div className="md-list">
+        {local.length ? local.map((m) => (
+          <div className="md-edit" key={m.id}>
+            <input
+              className="md-input"
+              value={m.name}
+              maxLength={12}
+              placeholder="药名"
+              aria-label="药名"
+              onChange={(e) => { const v = e.target.value; setLocal(local.map((x) => (x.id === m.id ? { ...x, name: v } : x))) }}
+              onBlur={() => onChange(local)}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+            />
+            <span className="md-step">
+              <button type="button" className="rh-step" onClick={() => patch(m.id, { times: Math.max(1, m.times - 1) })} aria-label="少吃一次">−</button>
+              <span className="t">{m.times} 次</span>
+              <button type="button" className="rh-step" onClick={() => patch(m.id, { times: Math.min(6, m.times + 1) })} aria-label="多吃一次">+</button>
+            </span>
+            <button type="button" className="rh-drop" onClick={() => del(m.id)} aria-label={'删掉 ' + (m.name || '这种药')}>−</button>
+          </div>
+        )) : <p className="rh-note">还没加药。加一种，正面就多出一排药丸。</p>}
+      </div>
+      {local.length < 6 ? (
+        <button type="button" className="rh-open md-add" onClick={add}>+ 加一种药</button>
+      ) : null}
+      <p className="rh-note">一天几次就放几颗药丸；点药丸记一次，吃够了再点就撤回来。名字最多 12 个字，最多 6 种药。</p>
+    </>
+  )
+}
 // 背面只剩提醒节奏；语音那套搬到独立面板（src/voice.jsx），入口在页面顶部。
 export function BackRoutine({ rules, onToggle, onEvery, onGap, onSit, onTime, onAddTime }) {
   return (

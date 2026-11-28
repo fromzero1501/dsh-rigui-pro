@@ -205,7 +205,7 @@ const DEFAULT_RULES = [
   { id: 'sleep', kind: 'sleep', title: '该睡了', mode: 'fixed', times: ['23:30'], enabled: true },
 ]
 
-const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], plans: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0, ai: { provider: '', model: '' }, voice: voiceDefaults(), act: actDefaults() })
+const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], plans: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0, ai: { provider: '', model: '' }, voice: voiceDefaults(), act: actDefaults(), meds: [] })
 
 function readStore() {
   try {
@@ -220,6 +220,11 @@ function readStore() {
     if (!Array.isArray(s.logs)) s.logs = []
     if (!Array.isArray(s.alarms)) s.alarms = []
     if (!Array.isArray(s.plans)) s.plans = []
+    // 吃药：一种药一行，只有名字和一天几次；药丸数量跟着 times 走，不另存
+    s.meds = (Array.isArray(s.meds) ? s.meds : [])
+      .filter((m) => m && typeof m === 'object')
+      .map((m, i) => ({ id: String(m.id || 'm' + i).slice(0, 24), name: String(m.name || '').replace(/\s+/g, ' ').trim().slice(0, 12), times: Math.max(1, Math.min(6, Math.round(+m.times) || 3)) }))
+      .slice(0, 6)
     if (!s.fired || typeof s.fired !== 'object') s.fired = {}
     s.prefs = { quiet: { from: '23:30', to: '07:30' }, system: true, ...(s.prefs || {}) }
     s.ai = { provider: '', model: '', ...(s.ai || {}) }
@@ -1360,6 +1365,7 @@ export function apply(ctx) {
       due: due.map((a) => ({ id: a.id, ruleId: a.ruleId, srcId: a.srcId || '', kind: a.kind, title: a.title, body: a.body, at: a.at })),
       next: next.slice(0, 6),
       today: {},
+      meds: store.meds || [],
       ai: store.ai || { provider: '', model: '' },
       voice: readVoice(store),
       speaking: saying ? { id: saying.id, text: saying.text, preparing: !!saying.preparing, since: saying.since } : null,
@@ -1512,10 +1518,27 @@ export function apply(ctx) {
         save()
         return { ok: true, result: statePayload(now) }
       }
+      if (action === 'meds') {
+        // 背面改药：整张清单覆盖；不在清单里的就算删了，药丸跟着消失
+        const list = Array.isArray(p.meds) ? p.meds : []
+        const seen = new Set()
+        store.meds = list
+          .filter((m) => m && typeof m === 'object')
+          .map((m, i) => {
+            let id = String(m.id || '').slice(0, 24) || 'm' + now.toString(36) + i
+            if (seen.has(id)) id = id + i
+            seen.add(id)
+            return { id, name: String(m.name || '').replace(/\s+/g, ' ').trim().slice(0, 12), times: Math.max(1, Math.min(6, Math.round(+m.times) || 3)) }
+          })
+          .slice(0, 6)
+        save()
+        return { ok: true, result: statePayload(now) }
+      }
       if (action === 'log') {
         const kind = String(p.kind || '').slice(0, 16)
+        const medId = String(p.medId || '').slice(0, 24)
         if (kind) {
-          store.logs.push({ id: 'l' + now.toString(36) + Math.random().toString(36).slice(2, 4), kind, at: Number(p.at) || now, amount: p.amount ? +p.amount : null })
+          store.logs.push({ id: 'l' + now.toString(36) + Math.random().toString(36).slice(2, 4), kind, at: Number(p.at) || now, amount: p.amount ? +p.amount : null, medId: medId || undefined })
           if (store.logs.length > 800) store.logs = store.logs.slice(-800)
           // 真喝了一杯，喝水计时从现在重新起算（计时只算人在电脑前的时间）
           if (kind === 'water') store.act = { ...readAct(store), waterMs: 0 }
@@ -1529,10 +1552,13 @@ export function apply(ctx) {
       if (action === 'undo') {
         // 点错了撤回来：把这一类最近的一条记录挪掉，提醒节奏跟着回退
         const kind = String(p.kind || '').slice(0, 16)
+        const medId = String(p.medId || '').slice(0, 24)
         let removed = null
         if (kind) {
           for (let i = store.logs.length - 1; i >= 0; i--) {
-            if (store.logs[i].kind === kind) { removed = store.logs.splice(i, 1)[0]; break }
+            if (store.logs[i].kind !== kind) continue
+            if (medId && store.logs[i].medId !== medId) continue
+            removed = store.logs.splice(i, 1)[0]; break
           }
           if (removed) { save(); runTick() }
         }

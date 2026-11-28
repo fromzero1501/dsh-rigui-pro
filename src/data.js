@@ -370,10 +370,21 @@ export function derive(records, now = Date.now()) {
     }
   })
 
+  // 吃药：按药（medId）算今天吃了几次，药丸数量由设置里的 times 决定
+  const medToday = {}
+  records.forEach((r) => {
+    if (r.type !== 'routine' || r.kind !== 'med' || !r.medId) return
+    if (!inDay(r, today)) return
+    const o = medToday[r.medId] || (medToday[r.medId] = { count: 0, lastAt: 0, title: r.title || '' })
+    o.count++
+    if (r.t > o.lastAt) o.lastAt = r.t
+  })
+
   const S = {
     now, today, meals, workouts, kcalIn, burned, allowance, spent, todaySpent, remaining, perDay, pace, daysLeft, dayOfMonth, daysInMonth,
     nowEvent, cats, pendingBills, lastNight, week, sleepAvg, weekWorkouts, weekMinutes, weekKcal, wNow, wDelta, weights, events, todayEvents, next, todos, heat, timeline,
     routines: { today: rToday, last: rLast },
+    meds: { today: medToday },
   }
   S.insights = insights(S, records)
   S.nextAdvice = adviceFor(S)

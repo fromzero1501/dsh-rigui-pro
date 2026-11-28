@@ -1348,6 +1348,14 @@ function derive(records, now = Date.now()) {
       if (r.t > o.lastAt) o.lastAt = r.t;
     }
   });
+  const medToday = {};
+  records.forEach((r) => {
+    if (r.type !== "routine" || r.kind !== "med" || !r.medId) return;
+    if (!inDay(r, today)) return;
+    const o = medToday[r.medId] || (medToday[r.medId] = { count: 0, lastAt: 0, title: r.title || "" });
+    o.count++;
+    if (r.t > o.lastAt) o.lastAt = r.t;
+  });
   const S2 = {
     now,
     today,
@@ -1382,7 +1390,8 @@ function derive(records, now = Date.now()) {
     todos,
     heat,
     timeline,
-    routines: { today: rToday, last: rLast }
+    routines: { today: rToday, last: rLast },
+    meds: { today: medToday }
   };
   S2.insights = insights(S2, records);
   S2.nextAdvice = adviceFor(S2);
@@ -5151,6 +5160,30 @@ var CSS4 = `
 .wh-say{margin-top:0;align-self:auto}
 .wh-minus{width:27px;height:27px;flex:none;border-radius:9px;border:1px solid var(--rule,rgba(31,35,40,.12));background:transparent;color:var(--ink2,#6B7280);font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:0}
 .wh-minus:disabled{opacity:.35;cursor:default}
+.md-pot{position:relative;flex:none;width:44px;height:98px;display:flex;flex-direction:column;align-items:center}
+.md-cap{width:24px;height:8px;border-radius:3px 3px 1px 1px;background:rgba(31,35,40,.2);flex:none}
+.md-body{flex:1;width:100%;margin-top:1px;border:2px solid rgba(31,35,40,.2);border-radius:5px 5px 9px 9px;background:linear-gradient(to bottom,rgba(255,255,255,.65),rgba(31,35,40,.04));padding:5px 3px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.md-pot.empty .md-body{border-style:dashed;opacity:.5}
+.md-slots{display:flex;flex-direction:column;gap:3px;overflow-y:auto;scrollbar-width:none;min-height:0}
+.md-slots::-webkit-scrollbar{width:0;height:0}
+.md-med{display:flex;flex-wrap:wrap;gap:2px;justify-content:center;padding:1px 0}
+.md-pill{position:relative;width:8px;height:8px;padding:0;border:0;border-radius:50%;background:var(--pc,#3B82C4);opacity:.9;cursor:pointer;transition:opacity .12s ease}
+.md-pill::after{content:"";position:absolute;inset:-4px}
+.md-pill:hover{opacity:1}
+.md-pill.on{background:transparent;border:1.5px solid var(--pc,#3B82C4);opacity:.45;box-sizing:border-box}
+.md-legend{display:flex;flex-direction:column;gap:2px;margin-top:2px;min-width:0}
+.md-row{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink2,#6B7280);line-height:1.35;min-width:0}
+.md-dot{width:6px;height:6px;border-radius:50%;flex:none}
+.md-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.md-cnt{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink,#1F2328)}
+.md-cnt.done{color:#1E9E6A}
+.md-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.md-edit{display:flex;align-items:center;gap:6px}
+.md-input{flex:1;min-width:0;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--rule,rgba(31,35,40,.14));background:transparent;color:inherit;font:inherit;font-size:13px}
+.md-input:focus-visible{outline:2px solid rgba(59,130,196,.45);outline-offset:1px}
+.md-step{display:inline-flex;align-items:center;gap:4px;flex:none}
+.md-step .t{font-size:12px;color:var(--ink2,#6B7280);font-variant-numeric:tabular-nums;min-width:28px;text-align:center}
+.md-add{margin-top:8px;align-self:flex-start}
 .rh-line{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--ink2,#6B7280);margin-top:8px}
 .rh-next{display:flex;align-items:center;gap:6px}
 .rh-dot{width:6px;height:6px;border-radius:50%;background:#1E9E6A;flex:none;animation:rh-blink 2s ease-in-out infinite}
@@ -5247,15 +5280,20 @@ function RoutineCard({ ctx }) {
   const actText = st === "focus" ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, "专注中 ", /* @__PURE__ */ import_react10.default.createElement("b", null, mins(act.sinceMs), " 分钟")) : st === "desk" ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, "在电脑前", mins(act && act.seatMs) >= 1 ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, " ", /* @__PURE__ */ import_react10.default.createElement("b", null, mins(act.seatMs), " 分钟")) : null) : st === "away" ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, act && act.since ? fmtHM2(act.since) + " 离开的" : "离开了") : /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, helper === "missing" ? "采样器没装" : "未在监测");
   return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 2 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "日常"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-act " + st, title: broken ? "没在采样，状态点不亮" : "按最近一次键鼠输入判断" }, /* @__PURE__ */ import_react10.default.createElement("i", { "aria-hidden": "true" }), actText)), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-chips", style: { marginTop: 12 } }, /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "shower", voice, onSay, onLog, done: showerWait, locked: showerWait, title: "记一次洗澡（洗一次管 " + showerGap + " 天）", lockHint: "（还差 " + (showerGap - showerDays) + " 天）" }, drop("#3D4FB8"), "洗澡", showerDays != null ? /* @__PURE__ */ import_react10.default.createElement("b", null, showerDays === 0 ? "今天" : showerDays + " 天前") : null), /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "hair", voice, onSay, onLog, done: hairWait, locked: hairWait, title: "记一次洗头（洗一次管 " + hairGap + " 天）", lockHint: "（还差 " + (hairGap - hairDays) + " 天）" }, drop("#7C5CE0"), "洗头", hairDays != null ? /* @__PURE__ */ import_react10.default.createElement("b", null, hairDays === 0 ? "今天" : hairDays + " 天前") : null)), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-line" }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-next" }, soon ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-dot" }), fmtHM2(soon.at), " ", soon.title) : /* @__PURE__ */ import_react10.default.createElement("span", null, "今天的都过了"))), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-foot" }, /* @__PURE__ */ import_react10.default.createElement("p", { className: "rh-note" }, "喇叭亮着就会念；点一下先听，再点一下这件事就不念。洗澡洗头不满 3 天的按钮会灰掉；喝水在那张单独的杯子里记。")));
 }
+var MED_COLORS = ["#E2604C", "#3B82C4", "#1E9E6A", "#8B6BD9", "#D9963A", "#4C8C8C"];
 function WaterCard({ ctx }) {
-  const { S: S2, onLog, onMinus, onSay, voice } = ctx;
+  const { S: S2, onLog, onMinus, onSay, voice, meds, onMed, onMedUndo } = ctx;
   const water = S2.routines && S2.routines.today && S2.routines.today.water || { count: 0, ml: 0, lastAt: 0 };
   const cups = 8;
   const got = Math.min(cups, Math.round((water.ml || 0) / 250) || water.count || 0);
   const full = got >= cups || (water.ml || 0) >= 2e3;
   const level = Math.round(Math.min(got, cups) / cups * 100);
   const on = !(voice && voice.read && voice.read.water === false);
-  return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 2 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "喝水"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, full ? "今天喝够了" : "点一下杯子加一杯")), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-wrap" }, /* @__PURE__ */ import_react10.default.createElement(
+  const list = (Array.isArray(meds) ? meds : []).filter((m) => m && m.name);
+  const today = S2.meds && S2.meds.today || {};
+  const cntOf = (id) => today[id] && today[id].count || 0;
+  const allDone = list.length > 0 && list.every((m) => cntOf(m.id) >= m.times);
+  return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 2 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "喝水吃药"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, allDone ? "今天的药吃完了" : list.length ? "点药丸记一次" : full ? "今天喝够了" : "点一下杯子加一杯")), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-wrap" }, /* @__PURE__ */ import_react10.default.createElement(
     "button",
     {
       type: "button",
@@ -5268,7 +5306,24 @@ function WaterCard({ ctx }) {
     },
     /* @__PURE__ */ import_react10.default.createElement("span", { className: "wh-water", style: { height: level + "%" }, "aria-hidden": "true" }),
     full ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "wh-full" }, "满") : null
-  ), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-side" }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-num" }, /* @__PURE__ */ import_react10.default.createElement("b", { style: { color: "#3B82C4" } }, got), /* @__PURE__ */ import_react10.default.createElement("span", null, "/ ", cups, " 杯")), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-ml" }, water.ml ? water.ml + " ml" : "还没喝"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-last" }, water.lastAt ? fmtHM2(water.lastAt) + " 喝过" : "一杯 250 ml"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-btns" }, /* @__PURE__ */ import_react10.default.createElement(
+  ), /* @__PURE__ */ import_react10.default.createElement("div", { className: "md-pot" + (list.length ? "" : " empty") }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "md-cap", "aria-hidden": "true" }), /* @__PURE__ */ import_react10.default.createElement("span", { className: "md-body" }, list.length ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "md-slots" }, list.map((m, i) => {
+    const c = cntOf(m.id);
+    return /* @__PURE__ */ import_react10.default.createElement("span", { className: "md-med", key: m.id }, Array.from({ length: m.times }).map((_, k) => /* @__PURE__ */ import_react10.default.createElement(
+      "button",
+      {
+        key: k,
+        type: "button",
+        className: "md-pill" + (k < c ? " on" : ""),
+        style: { "--pc": MED_COLORS[i % MED_COLORS.length] },
+        onClick: () => c >= m.times ? onMedUndo(m) : onMed(m),
+        title: c >= m.times ? m.name + " 今天吃够了，点一下撤回来" : m.name + "：点一颗记一次（" + c + "/" + m.times + "）",
+        "aria-label": m.name + " 第 " + Math.min(c + 1, m.times) + " 次，共 " + m.times + " 次"
+      }
+    )));
+  })) : null)), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-side" }, /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-num" }, /* @__PURE__ */ import_react10.default.createElement("b", { style: { color: "#3B82C4" } }, got), /* @__PURE__ */ import_react10.default.createElement("span", null, "/ ", cups, " 杯")), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-ml" }, water.ml ? water.ml + " ml" : "还没喝"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-last" }, water.lastAt ? fmtHM2(water.lastAt) + " 喝过" : "一杯 250 ml"), list.length ? /* @__PURE__ */ import_react10.default.createElement("div", { className: "md-legend" }, list.map((m, i) => {
+    const c = cntOf(m.id);
+    return /* @__PURE__ */ import_react10.default.createElement("div", { className: "md-row", key: m.id }, /* @__PURE__ */ import_react10.default.createElement("i", { className: "md-dot", style: { background: MED_COLORS[i % MED_COLORS.length] }, "aria-hidden": "true" }), /* @__PURE__ */ import_react10.default.createElement("span", { className: "md-name" }, m.name), /* @__PURE__ */ import_react10.default.createElement("b", { className: "md-cnt" + (c >= m.times ? " done" : "") }, c, "/", m.times));
+  })) : /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-last" }, "背面加药"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "wh-btns" }, /* @__PURE__ */ import_react10.default.createElement(
     "button",
     {
       type: "button",
@@ -5300,6 +5355,37 @@ function WaterCard({ ctx }) {
     },
     "−"
   )))));
+}
+function BackWaterMeds({ meds, onChange }) {
+  const [local, setLocal] = (0, import_react10.useState)(() => Array.isArray(meds) ? meds : []);
+  (0, import_react10.useEffect)(() => {
+    setLocal(Array.isArray(meds) ? meds : []);
+  }, [meds]);
+  const commit = (next) => {
+    setLocal(next);
+    onChange(next);
+  };
+  const patch = (id, kv) => commit(local.map((m) => m.id === id ? { ...m, ...kv } : m));
+  const del = (id) => commit(local.filter((m) => m.id !== id));
+  const add = () => commit([...local, { id: "m" + Date.now().toString(36), name: "新药", times: 1 }]);
+  return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h", style: { marginBottom: 6 } }, "吃什么药"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "md-list" }, local.length ? local.map((m) => /* @__PURE__ */ import_react10.default.createElement("div", { className: "md-edit", key: m.id }, /* @__PURE__ */ import_react10.default.createElement(
+    "input",
+    {
+      className: "md-input",
+      value: m.name,
+      maxLength: 12,
+      placeholder: "药名",
+      "aria-label": "药名",
+      onChange: (e) => {
+        const v = e.target.value;
+        setLocal(local.map((x) => x.id === m.id ? { ...x, name: v } : x));
+      },
+      onBlur: () => onChange(local),
+      onKeyDown: (e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }
+    }
+  ), /* @__PURE__ */ import_react10.default.createElement("span", { className: "md-step" }, /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-step", onClick: () => patch(m.id, { times: Math.max(1, m.times - 1) }), "aria-label": "少吃一次" }, "−"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "t" }, m.times, " 次"), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-step", onClick: () => patch(m.id, { times: Math.min(6, m.times + 1) }), "aria-label": "多吃一次" }, "+")), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-drop", onClick: () => del(m.id), "aria-label": "删掉 " + (m.name || "这种药") }, "−"))) : /* @__PURE__ */ import_react10.default.createElement("p", { className: "rh-note" }, "还没加药。加一种，正面就多出一排药丸。")), local.length < 6 ? /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-open md-add", onClick: add }, "+ 加一种药") : null, /* @__PURE__ */ import_react10.default.createElement("p", { className: "rh-note" }, "一天几次就放几颗药丸；点药丸记一次，吃够了再点就撤回来。名字最多 12 个字，最多 6 种药。"));
 }
 function BackRoutine({ rules, onToggle, onEvery, onGap, onSit, onTime, onAddTime }) {
   return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h", style: { marginBottom: 8 } }, "提醒怎么设"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-rules" }, (rules || []).map((r) => {
@@ -5755,6 +5841,7 @@ function LifeApp() {
   const [voiceMeta, setVoiceMeta] = (0, import_react11.useState)({ ffplay: false, cache: null });
   const [voiceSamples, setVoiceSamples] = (0, import_react11.useState)([]);
   const [voiceDefaults, setVoiceDefaults] = (0, import_react11.useState)(null);
+  const [meds, setMeds] = (0, import_react11.useState)([]);
   const [voiceOpen, setVoiceOpen] = (0, import_react11.useState)(false);
   const [plan, setPlan] = (0, import_react11.useState)({ open: false, busy: false, draft: null, error: "", date: "", text: "" });
   const [aiList, setAiList] = (0, import_react11.useState)({ providers: [], auto: { provider: "", model: "" } });
@@ -6069,6 +6156,7 @@ function LifeApp() {
       setSpeaking(j.result.speaking || null);
       if (j.result.voice) setVoice(j.result.voice);
       if (j.result.ai) setAiPick({ provider: j.result.ai.provider || "", model: j.result.ai.model || "" });
+      if (Array.isArray(j.result.meds)) setMeds(j.result.meds);
     }
     return j;
   }).catch(() => null), []);
@@ -6154,6 +6242,35 @@ function LifeApp() {
     pushRoutine({ action: "undo", kind: "water" });
     say("撤掉了：" + routineName("water") + " " + (last.amount || 250) + " ml");
   }, [commit, db.records, pushRoutine]);
+  const logMed = (0, import_react11.useCallback)((med) => {
+    if (!med || !med.id) return;
+    const t = Date.now();
+    const rec = { id: uid(), type: "routine", kind: "med", medId: med.id, t, title: med.name };
+    commit([rec], /* @__PURE__ */ new Set(["routine", "timeline", "dial"]));
+    say("记下了：" + med.name);
+    pushRoutine({ action: "log", kind: "med", medId: med.id, at: t });
+  }, [commit, pushRoutine]);
+  const undoMed = (0, import_react11.useCallback)((med) => {
+    if (!med || !med.id) return;
+    const t0 = /* @__PURE__ */ new Date();
+    t0.setHours(0, 0, 0, 0);
+    const ms = db.records.filter((r) => r.type === "routine" && r.kind === "med" && r.medId === med.id && r.t >= t0.getTime());
+    if (!ms.length) {
+      say(med.name + " 今天还没记过");
+      return;
+    }
+    const last = ms.reduce((a, b) => b.t > a.t ? b : a);
+    commit([], /* @__PURE__ */ new Set(["routine", "timeline", "dial"]), [last.id]);
+    pushRoutine({ action: "undo", kind: "med", medId: med.id });
+    say("撤掉了：" + med.name + " 一次");
+  }, [commit, db.records, pushRoutine]);
+  const saveMeds = (0, import_react11.useCallback)((next) => {
+    const prev = meds;
+    setMeds(next);
+    pushRoutine({ action: "meds", meds: next }).then((j) => {
+      if (!j || j.ok === false) setMeds(prev);
+    });
+  }, [meds, pushRoutine]);
   const addWeight = (0, import_react11.useCallback)((kg) => {
     const v = Math.round(kg * 10) / 10;
     const rec = { id: uid(), type: "weight", t: Date.now(), kg: v, title: "体重 " + v + " kg" };
@@ -6900,7 +7017,7 @@ function LifeApp() {
     inputRef.current && inputRef.current.focus();
   }, onInsight: (it) => setPinned((p0) => p0 && p0.id === it.id ? null : it), pinned })))), /* @__PURE__ */ import_react11.default.createElement("div", { ref: (el) => {
     refs.current.dial = el;
-  }, "data-ev": "dial", style: { display: "grid" } }, /* @__PURE__ */ import_react11.default.createElement(Dial, { S: S2, hover, setHover }))))), /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-widgets", ref: gridRef, style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: ROW_H + "px", gridAutoFlow: "dense", gap: GAP } }, /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("energy", 1), cls: "s4", back: /* @__PURE__ */ import_react11.default.createElement(BackEnergy, { S: S2 }) }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between" } }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "今天还能吃"), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, "目标 ", num(GOALS.kcal), " 千卡")), /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 6, margin: "14px 0 16px" } }, /* @__PURE__ */ import_react11.default.createElement("span", { key: pulse.shake, "data-ev": "energy.num", className: pulse.shake ? "lf-shake" : "", style: { display: "inline-block" } }, /* @__PURE__ */ import_react11.default.createElement(Num, { value: Math.abs(S2.allowance), style: { fontSize: 52, fontWeight: 500, lineHeight: 1, color: S2.allowance < 0 ? C2.link : C2.ink }, className: "lf-num" })), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, S2.allowance < 0 ? "千卡，已超出" : "千卡")), /* @__PURE__ */ import_react11.default.createElement(EnergyTaste, { S: S2, pour: pulse.pour })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("money", 2), cls: "s4", bg: C2.money, color: "#fff", back: /* @__PURE__ */ import_react11.default.createElement(BackMoney, { S: S2 }) }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between" } }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, S2.remaining < 0 ? "这个月已超支" : "这个月还能花"), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-row", style: { gap: 8 } }, /* @__PURE__ */ import_react11.default.createElement("span", { style: { fontSize: 13, opacity: 0.8 } }, "还剩 ", S2.daysLeft, " 天"), /* @__PURE__ */ import_react11.default.createElement("button", { type: "button", className: "lf-printbtn" + (printOpen ? " on" : ""), onClick: () => setPrintOpen((v) => !v), "aria-label": printOpen ? "收起小票" : "打印今天的花销小票", title: "打印小票" }, /* @__PURE__ */ import_react11.default.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react11.default.createElement("path", { d: "M7 9V3h10v6" }), /* @__PURE__ */ import_react11.default.createElement("rect", { x: "3", y: "9", width: "18", height: "8", rx: "2" }), /* @__PURE__ */ import_react11.default.createElement("path", { d: "M7 14h10v7H7z" }), /* @__PURE__ */ import_react11.default.createElement("path", { d: "M17.5 12h.01" }))))), /* @__PURE__ */ import_react11.default.createElement("div", { style: { margin: "14px 0 16px" } }, /* @__PURE__ */ import_react11.default.createElement("span", { "data-ev": "money.num", style: { display: "inline-block" } }, /* @__PURE__ */ import_react11.default.createElement(Num, { value: Math.abs(S2.remaining), format: money, style: { fontSize: 52, fontWeight: 500, lineHeight: 1 } }))), /* @__PURE__ */ import_react11.default.createElement(MoneyStrip, { S: S2, coin: pulse.coin })), /* @__PURE__ */ import_react11.default.createElement(NextCard, { P: P2, S: S2, onDone: doneEvent }), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("routine", 11), cls: "s4", back: /* @__PURE__ */ import_react11.default.createElement(BackRoutine, { rules, onToggle: toggleRule, onEvery: bumpEvery, onGap: bumpGap, onSit: bumpSit, onTime: setRuleTime, onAddTime: addRuleTime }) }, /* @__PURE__ */ import_react11.default.createElement(RoutineCard, { ctx: { S: S2, rules, onLog: logRoutine, next: reminderNext, voice, onSay: sayRoutine, act: activity } }), coachLines[0] ? /* @__PURE__ */ import_react11.default.createElement("div", { style: { marginTop: 10, fontSize: 12.5, lineHeight: 1.55, color: "var(--ink2)" } }, "AI · ", coachLines[0]) : null), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("water", 12), cls: "s3" }, /* @__PURE__ */ import_react11.default.createElement(WaterCard, { ctx: { S: S2, onLog: logRoutine, onMinus: undoWater, voice, onSay: sayRoutine } })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("timeline", 4), cls: "s5 r2", style: { display: "flex", flexDirection: "column" } }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 8 } }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "今天记下的"), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, S2.timeline.length ? S2.timeline.length + " 件" : "还空着", ghosts.filter((g) => S2.today + g.h * 36e5 <= S2.now).length ? " · " + ghosts.filter((g) => S2.today + g.h * 36e5 <= S2.now).length + " 件没记" : "")), /* @__PURE__ */ import_react11.default.createElement(TodayList, { S: S2, ghosts, onFill: fillFrom, onRemove: removeGroup })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("sleep", 5), cls: "s4", bg: C2.sleep, color: "#fff", back: /* @__PURE__ */ import_react11.default.createElement(BackSleep, { S: S2 }) }, /* @__PURE__ */ import_react11.default.createElement(SleepSky, null), /* @__PURE__ */ import_react11.default.createElement(SleepBody, { S: S2 })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("move", 6), cls: "s3", back: /* @__PURE__ */ import_react11.default.createElement(BackMove, { S: S2, workouts: db.records.filter((r) => r.type === "workout" && r.t >= S2.today - 6 * 864e5).sort((a, b) => b.t - a.t) }) }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "这周练了"), /* @__PURE__ */ import_react11.default.createElement("div", { "data-ev": "move.count", style: { display: "flex", alignItems: "baseline", gap: 6, margin: "12px 0 10px", alignSelf: "flex-start" } }, /* @__PURE__ */ import_react11.default.createElement(Num, { value: S2.weekWorkouts, style: { fontSize: 44, fontWeight: 500, lineHeight: 1 } }), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, "/ ", GOALS.workoutsPerWeek, " 次 · ", /* @__PURE__ */ import_react11.default.createElement(Num, { value: S2.weekMinutes }), " 分钟")), /* @__PURE__ */ import_react11.default.createElement(MoveBars, { S: S2 })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("insights", 7), cls: "s4" }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 6 } }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "它们之间的关系"), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, pinned ? "已钉住 · 点别处或按 Esc 取消" : "悬停看因果，点一下钉住")), S2.insights.length === 0 ? /* @__PURE__ */ import_react11.default.createElement("p", { className: "lf-sub", style: { margin: "12px 0" } }, "多记几天，这里会找出睡眠、吃饭、花钱之间的规律。") : /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column" } }, S2.insights.slice(0, 4).map((it, i) => /* @__PURE__ */ import_react11.default.createElement(
+  }, "data-ev": "dial", style: { display: "grid" } }, /* @__PURE__ */ import_react11.default.createElement(Dial, { S: S2, hover, setHover }))))), /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-widgets", ref: gridRef, style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: ROW_H + "px", gridAutoFlow: "dense", gap: GAP } }, /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("energy", 1), cls: "s4", back: /* @__PURE__ */ import_react11.default.createElement(BackEnergy, { S: S2 }) }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between" } }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "今天还能吃"), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, "目标 ", num(GOALS.kcal), " 千卡")), /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 6, margin: "14px 0 16px" } }, /* @__PURE__ */ import_react11.default.createElement("span", { key: pulse.shake, "data-ev": "energy.num", className: pulse.shake ? "lf-shake" : "", style: { display: "inline-block" } }, /* @__PURE__ */ import_react11.default.createElement(Num, { value: Math.abs(S2.allowance), style: { fontSize: 52, fontWeight: 500, lineHeight: 1, color: S2.allowance < 0 ? C2.link : C2.ink }, className: "lf-num" })), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, S2.allowance < 0 ? "千卡，已超出" : "千卡")), /* @__PURE__ */ import_react11.default.createElement(EnergyTaste, { S: S2, pour: pulse.pour })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("money", 2), cls: "s4", bg: C2.money, color: "#fff", back: /* @__PURE__ */ import_react11.default.createElement(BackMoney, { S: S2 }) }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between" } }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, S2.remaining < 0 ? "这个月已超支" : "这个月还能花"), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-row", style: { gap: 8 } }, /* @__PURE__ */ import_react11.default.createElement("span", { style: { fontSize: 13, opacity: 0.8 } }, "还剩 ", S2.daysLeft, " 天"), /* @__PURE__ */ import_react11.default.createElement("button", { type: "button", className: "lf-printbtn" + (printOpen ? " on" : ""), onClick: () => setPrintOpen((v) => !v), "aria-label": printOpen ? "收起小票" : "打印今天的花销小票", title: "打印小票" }, /* @__PURE__ */ import_react11.default.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ import_react11.default.createElement("path", { d: "M7 9V3h10v6" }), /* @__PURE__ */ import_react11.default.createElement("rect", { x: "3", y: "9", width: "18", height: "8", rx: "2" }), /* @__PURE__ */ import_react11.default.createElement("path", { d: "M7 14h10v7H7z" }), /* @__PURE__ */ import_react11.default.createElement("path", { d: "M17.5 12h.01" }))))), /* @__PURE__ */ import_react11.default.createElement("div", { style: { margin: "14px 0 16px" } }, /* @__PURE__ */ import_react11.default.createElement("span", { "data-ev": "money.num", style: { display: "inline-block" } }, /* @__PURE__ */ import_react11.default.createElement(Num, { value: Math.abs(S2.remaining), format: money, style: { fontSize: 52, fontWeight: 500, lineHeight: 1 } }))), /* @__PURE__ */ import_react11.default.createElement(MoneyStrip, { S: S2, coin: pulse.coin })), /* @__PURE__ */ import_react11.default.createElement(NextCard, { P: P2, S: S2, onDone: doneEvent }), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("routine", 11), cls: "s4", back: /* @__PURE__ */ import_react11.default.createElement(BackRoutine, { rules, onToggle: toggleRule, onEvery: bumpEvery, onGap: bumpGap, onSit: bumpSit, onTime: setRuleTime, onAddTime: addRuleTime }) }, /* @__PURE__ */ import_react11.default.createElement(RoutineCard, { ctx: { S: S2, rules, onLog: logRoutine, next: reminderNext, voice, onSay: sayRoutine, act: activity } }), coachLines[0] ? /* @__PURE__ */ import_react11.default.createElement("div", { style: { marginTop: 10, fontSize: 12.5, lineHeight: 1.55, color: "var(--ink2)" } }, "AI · ", coachLines[0]) : null), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("water", 12), cls: "s3", back: /* @__PURE__ */ import_react11.default.createElement(BackWaterMeds, { meds, onChange: saveMeds }) }, /* @__PURE__ */ import_react11.default.createElement(WaterCard, { ctx: { S: S2, onLog: logRoutine, onMinus: undoWater, voice, onSay: sayRoutine, meds, onMed: logMed, onMedUndo: undoMed } })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("timeline", 4), cls: "s5 r2", style: { display: "flex", flexDirection: "column" } }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 8 } }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "今天记下的"), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, S2.timeline.length ? S2.timeline.length + " 件" : "还空着", ghosts.filter((g) => S2.today + g.h * 36e5 <= S2.now).length ? " · " + ghosts.filter((g) => S2.today + g.h * 36e5 <= S2.now).length + " 件没记" : "")), /* @__PURE__ */ import_react11.default.createElement(TodayList, { S: S2, ghosts, onFill: fillFrom, onRemove: removeGroup })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("sleep", 5), cls: "s4", bg: C2.sleep, color: "#fff", back: /* @__PURE__ */ import_react11.default.createElement(BackSleep, { S: S2 }) }, /* @__PURE__ */ import_react11.default.createElement(SleepSky, null), /* @__PURE__ */ import_react11.default.createElement(SleepBody, { S: S2 })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("move", 6), cls: "s3", back: /* @__PURE__ */ import_react11.default.createElement(BackMove, { S: S2, workouts: db.records.filter((r) => r.type === "workout" && r.t >= S2.today - 6 * 864e5).sort((a, b) => b.t - a.t) }) }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "这周练了"), /* @__PURE__ */ import_react11.default.createElement("div", { "data-ev": "move.count", style: { display: "flex", alignItems: "baseline", gap: 6, margin: "12px 0 10px", alignSelf: "flex-start" } }, /* @__PURE__ */ import_react11.default.createElement(Num, { value: S2.weekWorkouts, style: { fontSize: 44, fontWeight: 500, lineHeight: 1 } }), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, "/ ", GOALS.workoutsPerWeek, " 次 · ", /* @__PURE__ */ import_react11.default.createElement(Num, { value: S2.weekMinutes }), " 分钟")), /* @__PURE__ */ import_react11.default.createElement(MoveBars, { S: S2 })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("insights", 7), cls: "s4" }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 6 } }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "它们之间的关系"), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, pinned ? "已钉住 · 点别处或按 Esc 取消" : "悬停看因果，点一下钉住")), S2.insights.length === 0 ? /* @__PURE__ */ import_react11.default.createElement("p", { className: "lf-sub", style: { margin: "12px 0" } }, "多记几天，这里会找出睡眠、吃饭、花钱之间的规律。") : /* @__PURE__ */ import_react11.default.createElement("div", { style: { display: "flex", flexDirection: "column" } }, S2.insights.slice(0, 4).map((it, i) => /* @__PURE__ */ import_react11.default.createElement(
     "div",
     {
       key: it.id,

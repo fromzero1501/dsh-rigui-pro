@@ -11,7 +11,7 @@ import { MoneyStrip, SleepSky, useSleepRow, MoveBars, useTaste, WeightScrub, Bac
 import { suggestGoals, GoalsPanel, GoalsButton, GOALS_CSS } from './goals.jsx'
 import PlanPanel from './plan.jsx'
 import VoicePanel from './voice.jsx'
-import { RoutineCard, WaterCard, BackRoutine, ReminderStack } from './habits.jsx'
+import { RoutineCard, WaterCard, BackRoutine, BackWaterMeds, ReminderStack } from './habits.jsx'
 import { loadRules, saveRules, ruleLine, routineName, guessRoutine, guessWater, sinceLast } from './habits.js'
 
 const KEY = 'dsh-rigui:v1'
@@ -354,6 +354,7 @@ export default function LifeApp() {
   const [voiceMeta, setVoiceMeta] = useState({ ffplay: false, cache: null })
   const [voiceSamples, setVoiceSamples] = useState([])
   const [voiceDefaults, setVoiceDefaults] = useState(null)
+  const [meds, setMeds] = useState([])
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [plan, setPlan] = useState({ open: false, busy: false, draft: null, error: '', date: '', text: '' })
   const [aiList, setAiList] = useState({ providers: [], auto: { provider: '', model: '' } })
@@ -594,6 +595,7 @@ export default function LifeApp() {
       setSpeaking(j.result.speaking || null)
       if (j.result.voice) setVoice(j.result.voice)
       if (j.result.ai) setAiPick({ provider: j.result.ai.provider || '', model: j.result.ai.model || '' })
+      if (Array.isArray(j.result.meds)) setMeds(j.result.meds)
     }
     return j
   }).catch(() => null), [])
@@ -674,6 +676,35 @@ export default function LifeApp() {
     pushRoutine({ action: 'undo', kind: 'water' })
     say('撤掉了：' + routineName('water') + ' ' + (last.amount || 250) + ' ml')
   }, [commit, db.records, pushRoutine])
+
+  // 吃药：点一颗药丸记一次；点已经吃掉的把它撤回来
+  const logMed = useCallback((med) => {
+    if (!med || !med.id) return
+    const t = Date.now()
+    const rec = { id: uid(), type: 'routine', kind: 'med', medId: med.id, t, title: med.name }
+    commit([rec], new Set(['routine', 'timeline', 'dial']))
+    say('记下了：' + med.name)
+    pushRoutine({ action: 'log', kind: 'med', medId: med.id, at: t })
+  }, [commit, pushRoutine])
+
+  const undoMed = useCallback((med) => {
+    if (!med || !med.id) return
+    const t0 = new Date()
+    t0.setHours(0, 0, 0, 0)
+    const ms = db.records.filter((r) => r.type === 'routine' && r.kind === 'med' && r.medId === med.id && r.t >= t0.getTime())
+    if (!ms.length) { say(med.name + ' 今天还没记过'); return }
+    const last = ms.reduce((a, b) => (b.t > a.t ? b : a))
+    commit([], new Set(['routine', 'timeline', 'dial']), [last.id])
+    pushRoutine({ action: 'undo', kind: 'med', medId: med.id })
+    say('撤掉了：' + med.name + ' 一次')
+  }, [commit, db.records, pushRoutine])
+
+  // 背面改药：整张清单一次提交，成功后以服务端归一的结果为准，失败退回原样
+  const saveMeds = useCallback((next) => {
+    const prev = meds
+    setMeds(next)
+    pushRoutine({ action: 'meds', meds: next }).then((j) => { if (!j || j.ok === false) setMeds(prev) })
+  }, [meds, pushRoutine])
 
   // 在体重卡上直接记一笔（不用说话）
   const addWeight = useCallback((kg) => {
@@ -1376,8 +1407,8 @@ export default function LifeApp() {
           </Card>
 
           {/* 喝水：单独一张卡，点杯子加水 */}
-          <Card {...P('water', 12)} cls="s3">
-            <WaterCard ctx={{ S, onLog: logRoutine, onMinus: undoWater, voice, onSay: sayRoutine }} />
+          <Card {...P('water', 12)} cls="s3" back={<BackWaterMeds meds={meds} onChange={saveMeds} />}>
+            <WaterCard ctx={{ S, onLog: logRoutine, onMinus: undoWater, voice, onSay: sayRoutine, meds, onMed: logMed, onMedUndo: undoMed }} />
           </Card>
 
           {/* 时间线 */}
