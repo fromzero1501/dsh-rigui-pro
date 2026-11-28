@@ -1092,6 +1092,18 @@ export function apply(ctx) {
         }
         return { ok: true, result: statePayload(now) }
       }
+      if (action === 'undo') {
+        // 点错了撤回来：把这一类最近的一条记录挪掉，提醒节奏跟着回退
+        const kind = String(p.kind || '').slice(0, 16)
+        let removed = null
+        if (kind) {
+          for (let i = store.logs.length - 1; i >= 0; i--) {
+            if (store.logs[i].kind === kind) { removed = store.logs.splice(i, 1)[0]; break }
+          }
+          if (removed) { save(); runTick() }
+        }
+        return { ok: true, removed, result: statePayload(now) }
+      }
       if (action === 'logs') {
         if (Array.isArray(p.logs)) {
           for (const l of p.logs.slice(-60)) {

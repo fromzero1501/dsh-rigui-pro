@@ -645,6 +645,18 @@ export default function LifeApp() {
     pushRoutine({ action: 'log', kind, at: t, amount: ml })
   }, [commit, pushRoutine])
 
+  // 点错了撤一杯：把今天最后一条喝水记录删掉
+  const undoWater = useCallback(() => {
+    const t0 = new Date()
+    t0.setHours(0, 0, 0, 0)
+    const ws = db.records.filter((r) => r.type === 'routine' && r.kind === 'water' && r.t >= t0.getTime())
+    if (!ws.length) { say('今天还没记过喝水'); return }
+    const last = ws.reduce((a, b) => (b.t > a.t ? b : a))
+    commit([], new Set(['water', 'timeline', 'routine', 'dial']), [last.id])
+    pushRoutine({ action: 'undo', kind: 'water' })
+    say('撤掉了：' + routineName('water') + ' ' + (last.amount || 250) + ' ml')
+  }, [commit, db.records, pushRoutine])
+
   // 在体重卡上直接记一笔（不用说话）
   const addWeight = useCallback((kg) => {
     const v = Math.round(kg * 10) / 10
@@ -1314,7 +1326,7 @@ export default function LifeApp() {
 
           {/* 喝水：单独一张卡，点杯子加水 */}
           <Card {...P('water', 12)} cls="s3">
-            <WaterCard ctx={{ S, onLog: logRoutine, voice, onSay: sayRoutine }} />
+            <WaterCard ctx={{ S, onLog: logRoutine, onMinus: undoWater, voice, onSay: sayRoutine }} />
           </Card>
 
           {/* 时间线 */}

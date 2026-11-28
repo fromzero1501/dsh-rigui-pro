@@ -36,7 +36,10 @@ const CSS = `
 .wh-num span{font-size:12.5px;color:var(--ink2,#6B7280)}
 .wh-ml{font-size:12.5px;color:var(--ink2,#6B7280);font-variant-numeric:tabular-nums}
 .wh-last{font-size:12px;color:var(--ink3,#9AA0A6)}
-.wh-say{margin-top:2px;align-self:flex-start}
+.wh-btns{display:flex;align-items:center;gap:6px;margin-top:2px}
+.wh-say{margin-top:0;align-self:auto}
+.wh-minus{width:27px;height:27px;flex:none;border-radius:9px;border:1px solid var(--rule,rgba(31,35,40,.12));background:transparent;color:var(--ink2,#6B7280);font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:0}
+.wh-minus:disabled{opacity:.35;cursor:default}
 .rh-line{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--ink2,#6B7280);margin-top:8px}
 .rh-next{display:flex;align-items:center;gap:6px}
 .rh-dot{width:6px;height:6px;border-radius:50%;background:#1E9E6A;flex:none;animation:rh-blink 2s ease-in-out infinite}
@@ -138,7 +141,7 @@ export function RoutineCard({ ctx }) {
 
 // 喝水：一张卡就是一只杯子，点一次水位往上走一格，满 8 杯停在满格。
 export function WaterCard({ ctx }) {
-  const { S, onLog, onSay, voice } = ctx
+  const { S, onLog, onMinus, onSay, voice } = ctx
   const water = (S.routines && S.routines.today && S.routines.today.water) || { count: 0, ml: 0, lastAt: 0 }
   const cups = 8
   const got = Math.min(cups, Math.round((water.ml || 0) / 250) || water.count || 0)
@@ -169,14 +172,25 @@ export function WaterCard({ ctx }) {
           <div className="wh-num"><b style={{ color: '#3B82C4' }}>{got}</b><span>/ {cups} 杯</span></div>
           <div className="wh-ml">{water.ml ? water.ml + ' ml' : '还没喝'}</div>
           <div className="wh-last">{water.lastAt ? fmtHM(water.lastAt) + ' 喝过' : '一杯 250 ml'}</div>
-          <button
-            type="button"
-            className={'rh-say wh-say' + (on ? ' on' : ' dim')}
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSay('water') }}
-            title={on ? '念一句试试；再点一次就不念喝水' : '喝水不念；点一下开始念'}
-            aria-label={on ? '喝水要念，点一下取消' : '喝水不念，点一下开启'}
-            aria-pressed={on}
-          >{on ? '🔊' : '🔈'}</button>
+          <div className="wh-btns">
+            <button
+              type="button"
+              className={'rh-say wh-say' + (on ? ' on' : ' dim')}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSay('water') }}
+              title={on ? '念一句试试；再点一次就不念喝水' : '喝水不念；点一下开始念'}
+              aria-label={on ? '喝水要念，点一下取消' : '喝水不念，点一下开启'}
+              aria-pressed={on}
+            >{on ? '🔊' : '🔈'}</button>
+            <button
+              type="button"
+              className="wh-minus"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMinus() }}
+              disabled={got === 0}
+              aria-disabled={got === 0}
+              aria-label="点错了，撤掉最后一杯水"
+              title={got === 0 ? '今天还没记过，没有可撤的' : '点错了？撤掉最后一杯'}
+            >−</button>
+          </div>
         </div>
       </div>
     </>
