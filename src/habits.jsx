@@ -21,9 +21,22 @@ const CSS = `
 .rh-say:hover{background:rgba(31,35,40,.06)}
 .rh-say.on{border-color:rgba(30,158,106,.42);background:rgba(30,158,106,.13)}
 .rh-say.dim{opacity:.42}
-.rh-cups{display:flex;align-items:flex-end;gap:5px;height:44px;margin:10px 0 4px}
-.rh-cup{width:11px;border-radius:3px 3px 1px 1px;background:var(--rule,rgba(31,35,40,.12));transition:background .25s ease,height .25s ease}
-.rh-cup.on{background:#3B82C4}
+.wh-wrap{display:flex;align-items:center;gap:14px;margin:10px 0 4px;flex:1;min-height:0}
+.wh-glass{position:relative;width:64px;height:98px;flex:none;padding:0;border:2px solid rgba(59,130,196,.45);border-radius:7px 7px 18px 18px;background:rgba(59,130,196,.05);overflow:hidden;cursor:pointer;transition:transform .12s ease,border-color .2s ease}
+.wh-glass:hover{border-color:rgba(59,130,196,.75)}
+.wh-glass:active{transform:scale(.97)}
+.wh-glass.full{cursor:default;border-color:rgba(59,130,196,.8)}
+.wh-glass[disabled]{pointer-events:none}
+.wh-water{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(to top,#3B82C4,#67A9DC);transition:height .45s cubic-bezier(.2,.8,.2,1)}
+.wh-water::after{content:'';position:absolute;left:0;right:0;top:-3px;height:6px;border-radius:50%;background:rgba(255,255,255,.42)}
+.wh-full{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#0E5C8A;letter-spacing:.1em}
+.wh-side{display:flex;flex-direction:column;gap:4px;min-width:0}
+.wh-num{display:flex;align-items:baseline;gap:5px}
+.wh-num b{font-size:34px;font-weight:500;line-height:1;font-variant-numeric:tabular-nums}
+.wh-num span{font-size:12.5px;color:var(--ink2,#6B7280)}
+.wh-ml{font-size:12.5px;color:var(--ink2,#6B7280);font-variant-numeric:tabular-nums}
+.wh-last{font-size:12px;color:var(--ink3,#9AA0A6)}
+.wh-say{margin-top:2px;align-self:flex-start}
 .rh-line{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--ink2,#6B7280);margin-top:8px}
 .rh-next{display:flex;align-items:center;gap:6px}
 .rh-dot{width:6px;height:6px;border-radius:50%;background:#1E9E6A;flex:none;animation:rh-blink 2s ease-in-out infinite}
@@ -55,7 +68,7 @@ const CSS = `
 const drop = (color, size = 8) => <i style={{ background: color }} aria-hidden="true" />
 
 // 一件事 + 旁边那个小喇叭（点一下：念这句，并把它设成要念）
-function Chip({ kind, voice, onSay, onLog, done, locked, title, children }) {
+function Chip({ kind, voice, onSay, onLog, done, locked, title, lockHint, children }) {
   const on = !(voice && voice.read && voice.read[kind] === false)
   return (
     <span className="rh-item">
@@ -65,7 +78,7 @@ function Chip({ kind, voice, onSay, onLog, done, locked, title, children }) {
         onClick={() => onLog(kind)}
         disabled={!!locked}
         aria-disabled={!!locked}
-        title={locked ? title + '（今天已经记过了）' : title}
+        title={locked ? title + (lockHint || '（今天已经记过了）') : title}
       >
         {children}
       </button>
@@ -83,20 +96,16 @@ function Chip({ kind, voice, onSay, onLog, done, locked, title, children }) {
 
 export function RoutineCard({ ctx }) {
   const { S, rules, onLog, next, voice, onSay } = ctx
-  const water = (S.routines && S.routines.today && S.routines.today.water) || { count: 0, ml: 0, lastAt: 0 }
   const lastOf = (k) => (S.routines && S.routines.last && S.routines.last[k]) || null
   const daysOf = (r) => (r ? Math.floor((S.now - r.t) / 86400000) : null)
   const showerLast = lastOf('shower'), hairLast = lastOf('hair')
   const showerDays = daysOf(showerLast), hairDays = daysOf(hairLast)
-  const cups = 8
-  const filled = Math.min(cups, Math.round(water.ml / 250) || water.count)
   const soon = useMemo(() => (next || []).filter((n) => n.at > S.now).sort((a, b) => a.at - b.at)[0], [next, S.now])
   const showerRule = (rules || []).find((r) => r.id === 'shower')
   const hairRule = (rules || []).find((r) => r.id === 'hair')
   const showerGap = (showerRule && showerRule.minGapDays) || 3
   const hairGap = (hairRule && hairRule.minGapDays) || 3
-  // 喝水：点一次加一杯，满 8 杯就停；洗澡洗头：洗完 3 天内不用再记
-  const waterFull = water.ml >= 2000 || water.count >= 8
+  // 洗澡洗头：洗完 3 天内不用再记（喝水已经单独一张卡了）
   const showerWait = showerDays != null && showerDays < showerGap
   const hairWait = hairDays != null && hairDays < hairGap
 
@@ -105,21 +114,13 @@ export function RoutineCard({ ctx }) {
       <style>{CSS}</style>
       <div className="lf-row" style={{ justifyContent: 'space-between', marginBottom: 2 }}>
         <h2 className="lf-h">日常</h2>
-        <span className="lf-sub">{water.ml ? water.ml + ' ml' : water.count ? water.count + ' 杯' : '还没记'}</span>
+        <span className="lf-sub">{showerDays != null ? '上次洗澡 ' + (showerDays === 0 ? '今天' : showerDays + ' 天前') : '还没记'}</span>
       </div>
-      <div className="rh-cups" aria-hidden="true">
-        {Array.from({ length: cups }, (_, i) => (
-          <span key={i} className={'rh-cup' + (i < filled ? ' on' : '')} style={{ height: 12 + i * 4 }} />
-        ))}
-      </div>
-      <div className="rh-chips">
-        <Chip kind="water" voice={voice} onSay={onSay} onLog={onLog} done={!!water.count} locked={waterFull} title="记一杯水">
-          {drop('#3B82C4')}喝水 {water.count ? <b>{water.count} 杯</b> : null}
-        </Chip>
-        <Chip kind="shower" voice={voice} onSay={onSay} onLog={onLog} done={showerWait} locked={showerWait} title={'记一次洗澡（洗一次管 ' + showerGap + ' 天）'}>
+      <div className="rh-chips" style={{ marginTop: 12 }}>
+        <Chip kind="shower" voice={voice} onSay={onSay} onLog={onLog} done={showerWait} locked={showerWait} title={'记一次洗澡（洗一次管 ' + showerGap + ' 天）'} lockHint={'（还差 ' + (showerGap - showerDays) + ' 天）'}>
           {drop('#3D4FB8')}洗澡{showerDays != null ? <b>{showerDays === 0 ? '今天' : showerDays + ' 天前'}</b> : null}
         </Chip>
-        <Chip kind="hair" voice={voice} onSay={onSay} onLog={onLog} done={hairWait} locked={hairWait} title={'记一次洗头（洗一次管 ' + hairGap + ' 天）'}>
+        <Chip kind="hair" voice={voice} onSay={onSay} onLog={onLog} done={hairWait} locked={hairWait} title={'记一次洗头（洗一次管 ' + hairGap + ' 天）'} lockHint={'（还差 ' + (hairGap - hairDays) + ' 天）'}>
           {drop('#7C5CE0')}洗头{hairDays != null ? <b>{hairDays === 0 ? '今天' : hairDays + ' 天前'}</b> : null}
         </Chip>
       </div>
@@ -127,10 +128,56 @@ export function RoutineCard({ ctx }) {
         <span className="rh-next">
           {soon ? <><span className="rh-dot" />{fmtHM(soon.at)} {soon.title}</> : <span>今天的都过了</span>}
         </span>
-        {water.lastAt ? <span>{fmtHM(water.lastAt)} 喝过</span> : null}
       </div>
       <div className="rh-foot">
-        <p className="rh-note">喇叭亮着就会念；点一下先听，再点一下这件事就不念。喝水满 8 杯、洗澡洗头不满 3 天的按钮会灰掉。</p>
+        <p className="rh-note">喇叭亮着就会念；点一下先听，再点一下这件事就不念。洗澡洗头不满 3 天的按钮会灰掉；喝水在那张单独的杯子里记。</p>
+      </div>
+    </>
+  )
+}
+
+// 喝水：一张卡就是一只杯子，点一次水位往上走一格，满 8 杯停在满格。
+export function WaterCard({ ctx }) {
+  const { S, onLog, onSay, voice } = ctx
+  const water = (S.routines && S.routines.today && S.routines.today.water) || { count: 0, ml: 0, lastAt: 0 }
+  const cups = 8
+  const got = Math.min(cups, Math.round((water.ml || 0) / 250) || water.count || 0)
+  const full = got >= cups || (water.ml || 0) >= 2000
+  const level = Math.round((Math.min(got, cups) / cups) * 100)
+  const on = !(voice && voice.read && voice.read.water === false)
+  return (
+    <>
+      <style>{CSS}</style>
+      <div className="lf-row" style={{ justifyContent: 'space-between', marginBottom: 2 }}>
+        <h2 className="lf-h">喝水</h2>
+        <span className="lf-sub">{full ? '今天喝够了' : '点一下杯子加一杯'}</span>
+      </div>
+      <div className="wh-wrap">
+        <button
+          type="button"
+          className={'wh-glass' + (full ? ' full' : '')}
+          onClick={() => onLog('water')}
+          disabled={full}
+          aria-disabled={full}
+          aria-label={full ? '今天八杯已经喝够了' : '喝了一杯水，当前 ' + got + ' 杯'}
+          title={full ? '今天八杯已经喝够了' : '点一下，加一杯（250 ml）'}
+        >
+          <span className="wh-water" style={{ height: level + '%' }} aria-hidden="true" />
+          {full ? <span className="wh-full">满</span> : null}
+        </button>
+        <div className="wh-side">
+          <div className="wh-num"><b style={{ color: '#3B82C4' }}>{got}</b><span>/ {cups} 杯</span></div>
+          <div className="wh-ml">{water.ml ? water.ml + ' ml' : '还没喝'}</div>
+          <div className="wh-last">{water.lastAt ? fmtHM(water.lastAt) + ' 喝过' : '一杯 250 ml'}</div>
+          <button
+            type="button"
+            className={'rh-say wh-say' + (on ? ' on' : ' dim')}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSay('water') }}
+            title={on ? '念一句试试；再点一次就不念喝水' : '喝水不念；点一下开始念'}
+            aria-label={on ? '喝水要念，点一下取消' : '喝水不念，点一下开启'}
+            aria-pressed={on}
+          >{on ? '🔊' : '🔈'}</button>
+        </div>
       </div>
     </>
   )

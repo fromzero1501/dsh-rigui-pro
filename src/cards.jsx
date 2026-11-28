@@ -290,14 +290,47 @@ export function BackMove({ S, workouts }) {
     </div>
   )
 }
-export function BackBody({ S, monthWeight }) {
+export function BackBody({ S, monthWeight, onEdit }) {
   const recent = S.weights.slice(-5).reverse()
   const tdee = S.wNow ? Math.round((S.wNow * 30) / 50) * 50 : null
+  const [openId, setOpenId] = useState(null)
+  const [draft, setDraft] = useState('')
+  const start = (w) => { setOpenId(w.id); setDraft(w.kg.toFixed(1)) }
+  const cancel = () => { setOpenId(null); setDraft('') }
+  const save = (w) => {
+    const v = Math.round(parseFloat(String(draft).replace(/[^\d.]/g, '')) * 10) / 10
+    if (!(v >= 25 && v <= 250)) return
+    if (onEdit) onEdit(w.id, v)
+    cancel()
+  }
   return (
     <div className="lf-back">
       <BackHead title="最近几次称重" />
       <div className="lf-back-list">
-        {recent.length ? recent.map((w) => <div key={w.id} className="lf-row" style={{ justifyContent: 'space-between' }}><span>{md(w.t)} {fmtTime(w.t)}</span><b className="lf-num">{w.kg.toFixed(1)} kg</b></div>) : <span>还没称过。</span>}
+        {recent.length ? recent.map((w) => (
+          <div key={w.id} className="lf-back-row">
+            <span>{md(w.t)} {fmtTime(w.t)}</span>
+            {openId === w.id ? (
+              <span className="lf-wedit">
+                <input
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save(w) } if (e.key === 'Escape') { e.preventDefault(); cancel() } }}
+                  inputMode="decimal"
+                  aria-label="改成多少 kg"
+                  style={{ width: 62, height: 26, padding: '0 7px', borderRadius: 8, border: '1px solid var(--rule)', background: 'var(--fill2,rgba(255,255,255,.72))', color: 'var(--ink)', font: 'inherit', fontSize: 13, textAlign: 'right' }}
+                />
+                <button type="button" className="lf-wedit-btn" onClick={() => save(w)} aria-label="保存这次称重">存</button>
+                <button type="button" className="lf-wedit-btn ghost" onClick={cancel} aria-label="不改了">撤</button>
+              </span>
+            ) : (
+              <button type="button" className="lf-wedit-num" onClick={() => start(w)} aria-label={'改这次称重，现在是 ' + w.kg.toFixed(1) + ' 公斤'} title="改成别的数字">
+                {w.kg.toFixed(1)} kg
+              </button>
+            )}
+          </div>
+        )) : <span>还没称过。</span>}
       </div>
       <p className="lf-back-note">{tdee ? `按 ${S.wNow.toFixed(1)} kg 估，每天大约消耗 ${num(tdee)} 千卡。` : ''}{monthWeight ? ` Boss 战目标 ${monthWeight} kg。` : ''}</p>
     </div>
@@ -454,6 +487,12 @@ export const CARDS_CSS = `
 .lf-eq-row.total b{font-size:18px}
 .lf-eq-op{width:14px;opacity:.55;font-weight:600}
 .lf-back-list{display:flex;flex-direction:column;gap:7px;margin-top:12px;font-size:13px;flex:0 1 auto;min-height:0;overflow:hidden;-webkit-mask-image:linear-gradient(#000 calc(100% - 18px),transparent);mask-image:linear-gradient(#000 calc(100% - 18px),transparent);padding-bottom:6px}
+.lf-back-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.lf-root .lf-wedit-num{position:relative;z-index:3;height:24px;padding:0 7px;border:0;border-radius:8px;background:transparent;color:var(--ink);font:inherit;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer;transition:background .18s}
+.lf-root .lf-wedit-num:hover{background:var(--fill2,rgba(255,255,255,.7))}
+.lf-wedit{position:relative;z-index:3;display:inline-flex;align-items:center;gap:4px}
+.lf-root .lf-wedit-btn{height:26px;padding:0 8px;border:0;border-radius:8px;background:#0E6E6E;color:#F4F5F1;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.lf-root .lf-wedit-btn.ghost{background:transparent;color:var(--ink2,#6B7280);font-weight:500}
 .lf-back-note{margin:auto 0 0;padding-top:10px;font-size:12.5px;opacity:.7;line-height:1.5}
 @media (prefers-reduced-motion:reduce){.lf-hop,.lf-swap,.lf-eq-row{animation:none}}
 `

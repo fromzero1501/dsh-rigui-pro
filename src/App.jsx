@@ -11,7 +11,7 @@ import { MoneyStrip, SleepSky, useSleepRow, MoveBars, useTaste, WeightScrub, Bac
 import { suggestGoals, GoalsPanel, GoalsButton, GOALS_CSS } from './goals.jsx'
 import PlanPanel from './plan.jsx'
 import VoicePanel from './voice.jsx'
-import { RoutineCard, BackRoutine, ReminderStack } from './habits.jsx'
+import { RoutineCard, WaterCard, BackRoutine, ReminderStack } from './habits.jsx'
 import { loadRules, saveRules, ruleLine, routineName, guessRoutine, guessWater, sinceLast } from './habits.js'
 
 const KEY = 'dsh-rigui:v1'
@@ -60,12 +60,12 @@ function cardsFor(records, now = Date.now()) {
     if (r.type === 'weight') { c.add('body'); c.add('timeline') }
     if (r.type === 'event') { c.add('week'); c.add('next'); if (today(r.t)) c.add('dial') }
     if (r.type === 'todo') { c.add('todos'); if (r.amount) c.add('money') }
-    if (r.type === 'routine') { c.add('routine'); c.add('timeline') }
+    if (r.type === 'routine') { c.add('routine'); c.add('timeline'); if (r.kind === 'water') c.add('water') }
   })
   if (records.length) c.add('insights')
   return c
 }
-const CARD_COLOR = { energy: C.food, dial: '#F4F5F1', timeline: C.time, money: C.money, move: C.move, sleep: C.sleep, next: C.move, week: C.time, todos: C.time, body: C.body, insights: C.link, routine: '#3B82C4' }
+const CARD_COLOR = { energy: C.food, dial: '#F4F5F1', timeline: C.time, money: C.money, move: C.move, sleep: C.sleep, next: C.move, week: C.time, todos: C.time, body: C.body, insights: C.link, routine: '#3B82C4', water: '#3B82C4' }
 const INSIGHT_CARD = { sleep: 'sleep', move: 'move', food: 'energy', money: 'money', body: 'body', time: 'week' }
 
 function load() {
@@ -187,6 +187,7 @@ const WIDGETS = {
   money: { name: '这个月还能花', w: 4, h: 2, minW: 3, minH: 2 },
   next: { name: '接下来', w: 4, h: 2, minW: 3, minH: 2 },
   routine: { name: '日常', w: 4, h: 3, minW: 3, minH: 2 },
+  water: { name: '喝水', w: 3, h: 3, minW: 3, minH: 2 },
   timeline: { name: '今天记下的', w: 5, h: 6, minW: 4, minH: 3 },
   sleep: { name: '睡眠', w: 4, h: 3, minW: 3, minH: 3 },
   move: { name: '运动', w: 3, h: 3, minW: 3, minH: 2 },
@@ -349,6 +350,7 @@ export default function LifeApp() {
   const [coachLines, setCoachLines] = useState([])
   const [voice, setVoice] = useState(null)
   const [voiceMeta, setVoiceMeta] = useState({ ffplay: false, cache: null })
+  const [voiceDefaults, setVoiceDefaults] = useState(null)
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [plan, setPlan] = useState({ open: false, busy: false, draft: null, error: '', date: '', text: '' })
   const [aiList, setAiList] = useState({ providers: [], auto: { provider: '', model: '' } })
@@ -593,6 +595,7 @@ export default function LifeApp() {
       const j = await callHost('voice', payload)
       const r = (j && j.result) || {}
       if (r.voice) setVoice(r.voice)
+      if (r.defaults) setVoiceDefaults(r.defaults)
       if (typeof r.ffplay === 'boolean') setVoiceMeta({ ffplay: r.ffplay, cache: r.cache || null })
       if (j && j.ok === false) say(j.error || '语音没成')
       return j
@@ -603,6 +606,8 @@ export default function LifeApp() {
   }
   const voiceSet = (patch) => runVoice({ action: 'set', voice: patch })
   const voiceTest = () => runVoice({ action: 'test' })
+  // 台词试听：直接把这句送去合成播放，不动配置
+  const voiceSay = (text) => runVoice({ action: 'say', text: String(text || '').slice(0, 60) })
   // 用哪个模型：列出 DSH 里的模型让用户自己指定，空着就是自动
   const runAIChoice = async (payload) => {
     try {
@@ -647,6 +652,16 @@ export default function LifeApp() {
     commit([rec], cardsFor([rec]))
     say('记下了：体重 ' + v + ' kg')
   }, [commit])
+
+  // 背面改体重：同一条记录就地改数值，别多出一条
+  const editWeight = useCallback((id, kg) => {
+    const v = Math.round(kg * 10) / 10
+    const old = db.records.find((r) => r.id === id)
+    if (!old) return
+    const rec = { ...old, kg: v, title: '体重 ' + v + ' kg' }
+    commit([rec], cardsFor([rec]), [id])
+    say('改成 ' + v + ' kg 了')
+  }, [commit, db.records])
 
   // 规则一动就告诉主机半边，它按这个算下一次提醒
   useEffect(() => { saveRules(rules); pushRoutine({ action: 'rules', rules }) }, [rules, pushRoutine])
@@ -1297,6 +1312,11 @@ export default function LifeApp() {
             {coachLines[0] ? <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink2)' }}>AI · {coachLines[0]}</div> : null}
           </Card>
 
+          {/* 喝水：单独一张卡，点杯子加水 */}
+          <Card {...P('water', 12)} cls="s3">
+            <WaterCard ctx={{ S, onLog: logRoutine, voice, onSay: sayRoutine }} />
+          </Card>
+
           {/* 时间线 */}
           <Card {...P('timeline', 4)} cls="s5 r2" style={{ display: 'flex', flexDirection: 'column' }}>
             <div className="lf-row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
@@ -1348,7 +1368,7 @@ export default function LifeApp() {
           </Card>
 
           {/* 身体 */}
-          <Card {...P('body', 8)} cls="s3" back={<><BackBody S={S} monthWeight={goals.adopted.monthWeight ? goals.monthWeight : null} />{S.wNow != null && <WeightFog />}</>}>
+          <Card {...P('body', 8)} cls="s3" back={<><BackBody S={S} monthWeight={goals.adopted.monthWeight ? goals.monthWeight : null} onEdit={editWeight} />{S.wNow != null && <WeightFog />}</>}>
             {S.wNow != null && <WeightFog />}
             <h2 className="lf-h">体重</h2>
             <div data-ev="body.num" style={{ display: 'flex', alignItems: 'baseline', gap: 6, margin: '12px 0 8px', alignSelf: 'flex-start' }}>
@@ -1514,7 +1534,7 @@ export default function LifeApp() {
         onClose={() => setPlan({ open: false, busy: false, draft: null, error: '', date: '', text: '' })}
         onAccept={acceptPlan} onReplan={(c) => openPlan(plan.text, c)} />
       <VoicePanel open={voiceOpen} voice={voice ? { ...voice, ffplay: voiceMeta.ffplay, cache: voiceMeta.cache } : null}
-        onClose={() => setVoiceOpen(false)} onSave={voiceSet} onTest={voiceTest}
+        onClose={() => setVoiceOpen(false)} onSave={voiceSet} onTest={voiceTest} onSay={voiceSay} defaults={voiceDefaults}
         onToggleRead={(k, on) => voiceSet({ read: { [k]: on } })}
         onGroup={(g, on) => voiceSet({ groups: { [g]: on } })}
         onLead={(d) => voiceSet({ leadMin: Math.max(0, Math.min(60, Number(voice && voice.leadMin) || 0) + d) })} />
