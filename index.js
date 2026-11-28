@@ -208,12 +208,25 @@ const PHRASES = {
   event: ['该开始了。', '到点了，准备一下。', '这件事该上了。'],
 }
 
+// 只有这 8 类日常琐事能自己写台词；待办/日程念的是标题 + 内置后缀
+const PHRASE_KINDS = ['water', 'shower', 'hair', 'meal', 'sleep', 'teeth', 'stretch', 'custom']
+const MAX_LINE = 60
+
+// 每一类的内置第一句，给面板当占位提示和试听兜底
+function defaultLines() {
+  const out = {}
+  for (const k of PHRASE_KINDS) out[k] = (PHRASES[k] && PHRASES[k][0]) || ''
+  return out
+}
+
 function voiceDefaults() {
   return {
     enabled: true,
     provider: 'cloud',
     read: { water: true, shower: true, hair: true, meal: true, sleep: true, teeth: true, stretch: true, custom: true },
     groups: { routine: true, todo: true, event: true },
+    // 用户自己写的台词：一件事一句，留空回退内置那几句轮换
+    lines: {},
     leadMin: 5,
     cloud: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini-tts', voice: 'alloy', format: 'mp3' },
     // 小米 MiMo：OpenAI 的 chat/completions 形状，2026-11 起限时免费
@@ -237,6 +250,16 @@ function readVoice(store) {
     cloud: { ...d.cloud, ...(raw.cloud || {}) },
     mimo: { ...d.mimo, ...(raw.mimo || {}) },
     local: { ...d.local, ...(raw.local || {}) },
+    // 台词只认这 8 类，非字符串/空白一律不收；显式覆盖掉 ...raw 里带进来的脏值
+    lines: (() => {
+      const out = {}
+      const src = (raw && raw.lines) || {}
+      for (const k of PHRASE_KINDS) {
+        const s = src[k]
+        if (typeof s === 'string' && s.trim()) out[k] = s.replace(/\s+/g, ' ').trim().slice(0, MAX_LINE)
+      }
+      return out
+    })(),
   }
 }
 
@@ -247,7 +270,7 @@ const VOICE_FIELDS = {
 }
 
 function mergeVoice(v, patch) {
-  const out = { ...v, read: { ...v.read }, groups: { ...v.groups }, cloud: { ...v.cloud }, mimo: { ...v.mimo }, local: { ...v.local } }
+  const out = { ...v, read: { ...v.read }, groups: { ...v.groups }, cloud: { ...v.cloud }, mimo: { ...v.mimo }, local: { ...v.local }, lines: { ...(v.lines || {}) } }
   if (!patch || typeof patch !== 'object') return out
   if (typeof patch.enabled === 'boolean') out.enabled = patch.enabled
   if (patch.provider === 'cloud' || patch.provider === 'mimo' || patch.provider === 'local') out.provider = patch.provider
@@ -262,6 +285,17 @@ function mergeVoice(v, patch) {
     }
   }
   if (isFinite(+patch.leadMin)) out.leadMin = Math.max(0, Math.min(60, Math.round(+patch.leadMin)))
+  if (patch.lines && typeof patch.lines === 'object') {
+    for (const k of PHRASE_KINDS) {
+      if (!(k in patch.lines)) continue
+      const s = patch.lines[k]
+      if (typeof s !== 'string') continue
+      const t = s.replace(/\s+/g, ' ').trim().slice(0, MAX_LINE)
+      // 传空串 = 恢复内置轮换
+      if (t) out.lines[k] = t
+      else delete out.lines[k]
+    }
+  }
   for (const group of ['cloud', 'mimo', 'local']) {
     const p = patch[group]
     if (!p || typeof p !== 'object') continue
@@ -274,6 +308,9 @@ function mergeVoice(v, patch) {
 
 // 同一天同一件事说同一句，隔天换一句；不为每句话去调模型
 function phraseFor(store, kind, now) {
+  // 用户给这件事写过台词就固定念那句，不再轮换
+  const own = store && store.voice && store.voice.lines && store.voice.lines[kind]
+  if (typeof own === 'string' && own) return own
   const pool = PHRASES[kind] || PHRASES.custom
   const n = Math.floor((now || Date.now()) / DAY) + (store && store.logs ? store.logs.length : 0)
   return pool[Math.abs(n) % pool.length]
@@ -1088,7 +1125,7 @@ export function apply(ctx) {
     if (body.endpoint === 'voice') {
       const v = readVoice(store)
       const action = p.action || 'get'
-      if (action === 'get') return { ok: true, result: { voice: v, ffplay: !!ffplayPath(), cache: cacheStat(), playing: !!playing } }
+      if (action === 'get') return { ok: true, result: { voice: v, defaults: defaultLines(), ffplay: !!ffplayPath(), cache: cacheStat(), playing: !!playing } }
       if (action === 'set') {
         const next = mergeVoice(v, p.voice)
         // 换了配置就把上一次的错误清掉：那条多半是对着旧配置报的，留着只会让人以为还没修好
@@ -1096,7 +1133,7 @@ export function apply(ctx) {
         next.lastErrorAt = 0
         store.voice = next
         save()
-        return { ok: true, result: { voice: next, ffplay: !!ffplayPath(), cache: cacheStat() } }
+        return { ok: true, result: { voice: next, defaults: defaultLines(), ffplay: !!ffplayPath(), cache: cacheStat() } }
       }
       if (action === 'say' || action === 'test') {
         const kind = String(p.kind || '').slice(0, 16)

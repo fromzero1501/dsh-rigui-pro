@@ -52,23 +52,27 @@ const CSS = `
 `
 
 const READ_KINDS = ['water', 'shower', 'hair', 'meal', 'sleep']
+// 能自己写台词的 8 类日常琐事
+const LINE_KINDS = ['water', 'shower', 'hair', 'meal', 'sleep', 'teeth', 'stretch', 'custom']
 const GROUPS = [['routine', '日常琐事'], ['todo', '待办'], ['event', '日程']]
 
 const blank = (v) => ({
   cloud: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini-tts', voice: 'alloy', format: 'mp3', ...((v && v.cloud) || {}) },
   mimo: { baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-tts', voice: 'mimo_default', format: 'mp3', ...((v && v.mimo) || {}) },
   local: { shape: 'gradio', baseUrl: 'http://127.0.0.1:7860', apiName: 'gen_single', format: 'wav', ...((v && v.local) || {}) },
+  lines: { ...((v && v.lines) || {}) },
 })
 
 const MIMO_VOICES = ['mimo_default', '冰糖', '茉莉', '苏打', '白桦', 'Mia', 'Chloe', 'Milo', 'Dean']
 
-export default function VoicePanel({ open, voice, onClose, onSave, onTest, onToggleRead, onGroup, onLead }) {
+export default function VoicePanel({ open, voice, onClose, onSave, onTest, onToggleRead, onGroup, onLead, onSay, defaults }) {
   const v = voice || {}
   const [d, setD] = useState(() => blank(v))
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
 
-  useEffect(() => { if (open) { setD(blank(voice)); setMsg('') } }, [open, voice && voice.lastAt])
+  // 只在打开那一下读进已存配置：试听会刷新 voice.lastAt，别因此冲掉正在输入的台词
+  useEffect(() => { if (open) { setD(blank(voice)); setMsg('') } }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -89,15 +93,21 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
   if (!open) return null
 
   const setField = (grp, f, val) => setD((x) => ({ ...x, [grp]: { ...x[grp], [f]: val } }))
+  const setLine = (k, val) => setD((x) => ({ ...x, lines: { ...x.lines, [k]: val } }))
   const flip = (patch) => { if (onSave) onSave(patch) }
   const save = async () => {
     setBusy(true); setMsg('')
     try {
-      const r = onSave ? await onSave({ provider, cloud: d.cloud, mimo: d.mimo, local: d.local }) : null
+      const r = onSave ? await onSave({ provider, cloud: d.cloud, mimo: d.mimo, local: d.local, lines: d.lines }) : null
       setMsg(!r || r.ok === false ? '没存上：' + ((r && r.error) || '主机没回应') : '存好了')
     } finally { setBusy(false) }
   }
   const test = () => { if (onTest) onTest() }
+  // 试听一条台词：输入框里改了还没保存也能听，空着就念内置的第一句
+  const sayLine = (k) => {
+    const t = String((d.lines && d.lines[k]) || '').trim() || String((defaults && defaults[k]) || '')
+    if (t && onSay) onSay(t)
+  }
 
   return (
     <>
@@ -188,6 +198,23 @@ export default function VoicePanel({ open, voice, onClose, onSave, onTest, onTog
             )
           })}
           <p className="rv-note">卡片上每件事旁边的小喇叭跟这里同步：点亮就念，再点一下这件事就不念。</p>
+
+          <div className="rv-sub">日常台词</div>
+          {LINE_KINDS.map((k) => (
+            <div className="rv-row" key={'ln-' + k}>
+              <span className="n">{routineName(k)}</span>
+              <input
+                className="rv-in"
+                value={(d.lines && d.lines[k]) || ''}
+                maxLength={60}
+                onChange={(e) => setLine(k, e.target.value)}
+                placeholder={(defaults && defaults[k]) || '留空就用内置那句'}
+                aria-label={routineName(k) + '的台词'}
+              />
+              <button type="button" className="rv-btn sm" onClick={() => sayLine(k)} aria-label={'试听：' + routineName(k)} title="念这一句听听">🔊</button>
+            </div>
+          ))}
+          <p className="rv-note">一件事一句话：填了就固定念这句，留空还按内置那几句轮换。🔊 念的是输入框里现在的内容，不用先保存。</p>
 
           <div className="rv-sub">哪几类要念</div>
           {GROUPS.map(([g, name]) => {
