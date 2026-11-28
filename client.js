@@ -5166,8 +5166,9 @@ var CSS4 = `
 .md-body{position:relative;flex:1;width:100%;margin-top:2px;border:1.5px solid rgba(31,35,40,.16);border-radius:7px 7px 12px 12px;background:linear-gradient(to bottom,#FFFFFF,#F6F8FA);overflow:hidden;min-height:0;box-shadow:inset 0 1px 3px rgba(31,35,40,.05)}
 .md-pot.empty .md-body{border-style:dashed;opacity:.55}
 .md-slots{position:absolute;inset:4px}
-.md-pill{position:absolute;width:13px;height:6.5px;border-radius:3.25px;border:1.5px solid var(--pc,#3B82C4);background:linear-gradient(to bottom,#FFFFFF,#EFF3F8);box-sizing:border-box;pointer-events:none;transition:opacity .16s ease,background .16s ease,border-color .16s ease}
-.md-pill.on{background:var(--pc,#3B82C4);border-color:var(--pc,#3B82C4);opacity:.28}
+.md-pill{position:absolute;width:12px;height:12px;border-radius:50%;border:1px solid rgba(31,35,40,.10);box-sizing:border-box;background:radial-gradient(circle at 34% 26%,#FFFFFF 0%,#F7F9FB 50%,color-mix(in srgb,var(--pc,#9AA1AA) 32%,#E6EBF1) 100%);box-shadow:inset 0 -1.5px 2px rgba(31,35,40,.10),inset 0 1.5px 1.5px rgba(255,255,255,.95),0 1.5px 2px rgba(31,35,40,.18);transform:translate(-50%,-50%) rotate(var(--rot,0deg));transition:opacity .24s ease,filter .24s ease;pointer-events:none}
+.md-pill::after{content:"";position:absolute;left:50%;top:50%;width:7px;height:1.4px;border-radius:1px;background:rgba(31,35,40,.13);transform:translate(-50%,-50%)}
+.md-pill.on{opacity:0;filter:blur(.6px)}
 .md-legend{display:flex;flex-direction:column;gap:1px;min-width:0}
 .md-row{display:flex;align-items:center;gap:2px;min-width:0}
 .md-take{display:flex;align-items:baseline;gap:6px;min-width:0;padding:3px 4px;border:0;border-radius:8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
@@ -5284,18 +5285,16 @@ function RoutineCard({ ctx }) {
 }
 var MED_COLORS = ["#E2604C", "#3B82C4", "#1E9E6A", "#8B6BD9", "#D9963A", "#4C8C8C"];
 var PILL_SLOTS = [
-  { x: 24, y: 11, r: -14 },
-  { x: 66, y: 9, r: 22 },
-  { x: 45, y: 23, r: 6 },
-  { x: 15, y: 29, r: 28 },
-  { x: 78, y: 33, r: -9 },
-  { x: 35, y: 41, r: -26 },
-  { x: 62, y: 49, r: 15 },
-  { x: 18, y: 55, r: 8 },
-  { x: 82, y: 61, r: -18 },
-  { x: 45, y: 65, r: 30 },
-  { x: 68, y: 76, r: -4 },
-  { x: 30, y: 80, r: 20 }
+  { x: 22, y: 87, r: -12 },
+  { x: 50, y: 88, r: 4 },
+  { x: 78, y: 86, r: 16 },
+  { x: 34, y: 70, r: -18 },
+  { x: 66, y: 69, r: 22 },
+  { x: 22, y: 53, r: 10 },
+  { x: 50, y: 52, r: -14 },
+  { x: 78, y: 54, r: 20 },
+  { x: 34, y: 36, r: -22 },
+  { x: 66, y: 35, r: 8 }
 ];
 function WaterCard({ ctx }) {
   const { S: S2, onLog, onMinus, onSay, voice, meds, onMed, onMedUndo } = ctx;
@@ -5366,10 +5365,10 @@ function WaterCard({ ctx }) {
         key: p.key,
         className: "md-pill" + (p.taken ? " on" : ""),
         style: {
+          "--rot": s.r + "deg",
           "--pc": MED_COLORS[p.di % MED_COLORS.length],
           left: s.x + "%",
           top: s.y + "%",
-          transform: "translate(-50%,-50%) rotate(" + s.r + "deg)",
           zIndex: Math.round(s.y)
         }
       }
