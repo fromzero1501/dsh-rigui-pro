@@ -30,7 +30,7 @@ const CSS = `
 .wh-water{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(to top,#3B82C4,#67A9DC);transition:height .45s cubic-bezier(.2,.8,.2,1)}
 .wh-water::after{content:'';position:absolute;left:0;right:0;top:-3px;height:6px;border-radius:50%;background:rgba(255,255,255,.42)}
 .wh-full{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#0E5C8A;letter-spacing:.1em}
-.wh-side{display:flex;flex-direction:column;gap:4px;min-width:0}
+.wh-side{display:flex;flex-direction:column;gap:4px;flex:1 1 auto;min-width:0}
 .wh-num{display:flex;align-items:baseline;gap:5px}
 .wh-num b{font-size:34px;font-weight:500;line-height:1;font-variant-numeric:tabular-nums}
 .wh-num span{font-size:12.5px;color:var(--ink2,#6B7280)}
@@ -40,23 +40,30 @@ const CSS = `
 .wh-say{margin-top:0;align-self:auto}
 .wh-minus{width:27px;height:27px;flex:none;border-radius:9px;border:1px solid var(--rule,rgba(31,35,40,.12));background:transparent;color:var(--ink2,#6B7280);font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:0}
 .wh-minus:disabled{opacity:.35;cursor:default}
-.md-pot{position:relative;flex:none;width:44px;height:98px;display:flex;flex-direction:column;align-items:center}
-.md-cap{width:24px;height:8px;border-radius:3px 3px 1px 1px;background:rgba(31,35,40,.2);flex:none}
+.md-zone{display:flex;align-items:center;gap:9px;margin-left:auto;flex:0 0 auto;min-width:0}
+.md-pot{position:relative;flex:none;width:52px;height:98px;display:flex;flex-direction:column;align-items:center}
+.md-cap{width:26px;height:8px;border-radius:3px 3px 1px 1px;background:rgba(31,35,40,.2);flex:none}
 .md-body{flex:1;width:100%;margin-top:1px;border:2px solid rgba(31,35,40,.2);border-radius:5px 5px 9px 9px;background:linear-gradient(to bottom,rgba(255,255,255,.65),rgba(31,35,40,.04));padding:5px 3px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
 .md-pot.empty .md-body{border-style:dashed;opacity:.5}
-.md-slots{display:flex;flex-direction:column;gap:3px;overflow-y:auto;scrollbar-width:none;min-height:0}
+.md-slots{display:flex;flex-direction:column;gap:4px;overflow-y:auto;scrollbar-width:none;min-height:0}
 .md-slots::-webkit-scrollbar{width:0;height:0}
 .md-med{display:flex;flex-wrap:wrap;gap:2px;justify-content:center;padding:1px 0}
-.md-pill{position:relative;width:8px;height:8px;padding:0;border:0;border-radius:50%;background:var(--pc,#3B82C4);opacity:.9;cursor:pointer;transition:opacity .12s ease}
-.md-pill::after{content:"";position:absolute;inset:-4px}
-.md-pill:hover{opacity:1}
-.md-pill.on{background:transparent;border:1.5px solid var(--pc,#3B82C4);opacity:.45;box-sizing:border-box}
-.md-legend{display:flex;flex-direction:column;gap:2px;margin-top:2px;min-width:0}
-.md-row{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink2,#6B7280);line-height:1.35;min-width:0}
-.md-dot{width:6px;height:6px;border-radius:50%;flex:none}
+.md-pill{position:relative;width:9px;height:16px;padding:0;border:1.5px solid var(--pc,#3B82C4);border-radius:5px;background:#fff;box-sizing:border-box;cursor:pointer;transition:background .12s ease,opacity .12s ease}
+.md-pill::after{content:"";position:absolute;inset:-3px}
+.md-pill:hover{background:rgba(59,130,196,.10)}
+.md-pill.on{background:var(--pc,#3B82C4);opacity:.32;border-color:var(--pc,#3B82C4)}
+.md-legend{display:flex;flex-direction:column;gap:1px;min-width:0}
+.md-row{display:flex;align-items:center;gap:3px;min-width:0}
+.md-take{display:flex;align-items:center;gap:5px;min-width:0;padding:2px 5px;border:0;border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:11.5px;line-height:1.35;text-align:left;cursor:pointer}
+.md-take:hover:enabled{background:rgba(59,130,196,.10)}
+.md-take:disabled{cursor:default}
+.md-dot{width:8px;height:14px;border-radius:4px;border:1.5px solid;box-sizing:border-box;flex:none}
 .md-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .md-cnt{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink,#1F2328)}
 .md-cnt.done{color:#1E9E6A}
+.md-minus{flex:none;width:18px;height:18px;padding:0;border:1px solid rgba(31,35,40,.16);border-radius:6px;background:transparent;color:var(--ink2,#6B7280);font-size:12px;line-height:1;cursor:pointer}
+.md-minus:hover:enabled{border-color:rgba(226,96,76,.65);color:#E2604C}
+.md-minus:disabled{opacity:.28;cursor:default}
 .md-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .md-edit{display:flex;align-items:center;gap:6px}
 .md-input{flex:1;min-width:0;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--rule,rgba(31,35,40,.14));background:transparent;color:inherit;font:inherit;font-size:13px}
@@ -232,51 +239,10 @@ export function WaterCard({ ctx }) {
           <span className="wh-water" style={{ height: level + '%' }} aria-hidden="true" />
           {full ? <span className="wh-full">满</span> : null}
         </button>
-        <div className={'md-pot' + (list.length ? '' : ' empty')}>
-          <span className="md-cap" aria-hidden="true" />
-          <span className="md-body">
-            {list.length ? (
-              <span className="md-slots">
-                {list.map((m, i) => {
-                  const c = cntOf(m.id)
-                  return (
-                    <span className="md-med" key={m.id}>
-                      {Array.from({ length: m.times }).map((_, k) => (
-                        <button
-                          key={k}
-                          type="button"
-                          className={'md-pill' + (k < c ? ' on' : '')}
-                          style={{ '--pc': MED_COLORS[i % MED_COLORS.length] }}
-                          onClick={() => (c >= m.times ? onMedUndo(m) : onMed(m))}
-                          title={c >= m.times ? m.name + ' 今天吃够了，点一下撤回来' : m.name + '：点一颗记一次（' + c + '/' + m.times + '）'}
-                          aria-label={m.name + ' 第 ' + Math.min(c + 1, m.times) + ' 次，共 ' + m.times + ' 次'}
-                        />
-                      ))}
-                    </span>
-                  )
-                })}
-              </span>
-            ) : null}
-          </span>
-        </div>
         <div className="wh-side">
           <div className="wh-num"><b style={{ color: '#3B82C4' }}>{got}</b><span>/ {cups} 杯</span></div>
           <div className="wh-ml">{water.ml ? water.ml + ' ml' : '还没喝'}</div>
           <div className="wh-last">{water.lastAt ? fmtHM(water.lastAt) + ' 喝过' : '一杯 250 ml'}</div>
-          {list.length ? (
-            <div className="md-legend">
-              {list.map((m, i) => {
-                const c = cntOf(m.id)
-                return (
-                  <div className="md-row" key={m.id}>
-                    <i className="md-dot" style={{ background: MED_COLORS[i % MED_COLORS.length] }} aria-hidden="true" />
-                    <span className="md-name">{m.name}</span>
-                    <b className={'md-cnt' + (c >= m.times ? ' done' : '')}>{c}/{m.times}</b>
-                  </div>
-                )
-              })}
-            </div>
-          ) : <div className="wh-last">背面加药</div>}
           <div className="wh-btns">
             <button
               type="button"
@@ -295,6 +261,67 @@ export function WaterCard({ ctx }) {
               aria-label="点错了，撤掉最后一杯水"
               title={got === 0 ? '今天还没记过，没有可撤的' : '点错了？撤掉最后一杯'}
             >−</button>
+          </div>
+        </div>
+        <div className="md-zone">
+          <div className={'md-pot' + (list.length ? '' : ' empty')}>
+            <span className="md-cap" aria-hidden="true" />
+            <span className="md-body">
+              {list.length ? (
+                <span className="md-slots">
+                  {list.map((m, i) => {
+                    const c = cntOf(m.id)
+                    const col = MED_COLORS[i % MED_COLORS.length]
+                    return (
+                      <span className="md-med" key={m.id}>
+                        {Array.from({ length: m.times }).map((_, k) => (
+                          <button
+                            key={k}
+                            type="button"
+                            className={'md-pill' + (k < c ? ' on' : '')}
+                            style={{ '--pc': col }}
+                            onClick={(e) => { e.stopPropagation(); if (c >= m.times) onMedUndo(m); else onMed(m) }}
+                            title={m.name + '：第 ' + Math.min(c + 1, m.times) + ' 次，共 ' + m.times + ' 次；吃够了再点一下撤回来'}
+                            aria-label={m.name + ' 第 ' + Math.min(c + 1, m.times) + ' 次，共 ' + m.times + ' 次'}
+                          />
+                        ))}
+                      </span>
+                    )
+                  })}
+                </span>
+              ) : null}
+            </span>
+          </div>
+          <div className="md-legend">
+            {list.length ? list.map((m, i) => {
+              const c = cntOf(m.id)
+              const col = MED_COLORS[i % MED_COLORS.length]
+              const done = c >= m.times
+              return (
+                <div className="md-row" key={m.id}>
+                  <button
+                    type="button"
+                    className="md-take"
+                    onClick={(e) => { e.stopPropagation(); onMed(m) }}
+                    disabled={done}
+                    title={done ? m.name + ' 今天吃够了' : '点一下，记一次 ' + m.name}
+                    aria-label={m.name + ' 已吃 ' + c + ' 次，共 ' + m.times + ' 次' + (done ? '，今天吃够了' : '，点一下记一次')}
+                  >
+                    <i className="md-dot" style={{ borderColor: col, background: done ? col : 'transparent' }} aria-hidden="true" />
+                    <span className="md-name">{m.name}</span>
+                    <b className={'md-cnt' + (done ? ' done' : '')}>{c}/{m.times}</b>
+                  </button>
+                  <button
+                    type="button"
+                    className="md-minus"
+                    onClick={(e) => { e.stopPropagation(); onMedUndo(m) }}
+                    disabled={c === 0}
+                    title={c === 0 ? '今天还没吃，没得撤' : '撤掉一次 ' + m.name}
+                    aria-label={'撤回 ' + m.name + ' 一次'}
+                  >−</button>
+                </div>
+              )
+            }) : <div className="wh-last">背面加药</div>}
           </div>
         </div>
       </div>
@@ -339,7 +366,7 @@ export function BackWaterMeds({ meds, onChange }) {
       {local.length < 6 ? (
         <button type="button" className="rh-open md-add" onClick={add}>+ 加一种药</button>
       ) : null}
-      <p className="rh-note">一天几次就放几颗药丸；点药丸记一次，吃够了再点就撤回来。名字最多 12 个字，最多 6 种药。</p>
+      <p className="rh-note">一天几次就放几片药；药名点一下记一次，旁边的减号撤回，药瓶里的药片点一下也一样。名字最多 12 个字，最多 6 种药。</p>
     </>
   )
 }
