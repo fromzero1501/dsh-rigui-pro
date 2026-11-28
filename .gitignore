@@ -5,3 +5,4 @@ dist/
 *.bak
 *.bak-*
 package-lock.json
+native/idlewatch.exe

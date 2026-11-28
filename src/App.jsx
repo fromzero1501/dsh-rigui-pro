@@ -347,6 +347,7 @@ export default function LifeApp() {
   const [rules, setRules] = useState(loadRules)
   const [reminders, setReminders] = useState([])
   const [reminderNext, setReminderNext] = useState([])
+  const [activity, setActivity] = useState(null)
   const [coachLines, setCoachLines] = useState([])
   const [voice, setVoice] = useState(null)
   const [voiceMeta, setVoiceMeta] = useState({ ffplay: false, cache: null })
@@ -583,6 +584,7 @@ export default function LifeApp() {
     if (j && j.result) {
       setReminders(j.result.due || [])
       setReminderNext(j.result.next || [])
+      if (j.result.activity) setActivity(j.result.activity)
       if (j.result.voice) setVoice(j.result.voice)
       if (j.result.ai) setAiPick({ provider: j.result.ai.provider || '', model: j.result.ai.model || '' })
     }
@@ -768,6 +770,7 @@ export default function LifeApp() {
   const toggleRule = (id) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, enabled: r.enabled === false } : r)))
   const bumpEvery = (id, d) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, everyMin: Math.max(15, Math.min(720, (r.everyMin || 90) + d)) } : r)))
   const bumpGap = (id, d) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, minGapDays: Math.max(1, Math.min(30, (r.minGapDays || 3) + d)) } : r)))
+  const bumpSit = (id, d) => setRules((rs) => rs.map((r) => (r.id === id ? { ...r, afterMin: Math.max(15, Math.min(180, (r.afterMin || 50) + d)) } : r)))
 
   // ===== AI 建议：一天几次就够，别唠叨 =====
   useEffect(() => {
@@ -1319,8 +1322,8 @@ export default function LifeApp() {
           <NextCard P={P} S={S} onDone={doneEvent} />
 
           {/* 日常：喝水、洗澡、洗头 */}
-          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} />}>
-            <RoutineCard ctx={{ S, rules, onLog: logRoutine, next: reminderNext, voice, onSay: sayRoutine }} />
+          <Card {...P('routine', 11)} cls="s4" back={<BackRoutine rules={rules} onToggle={toggleRule} onEvery={bumpEvery} onGap={bumpGap} onSit={bumpSit} />}>
+            <RoutineCard ctx={{ S, rules, onLog: logRoutine, next: reminderNext, voice, onSay: sayRoutine, act: activity }} />
             {coachLines[0] ? <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink2)' }}>AI · {coachLines[0]}</div> : null}
           </Card>
 

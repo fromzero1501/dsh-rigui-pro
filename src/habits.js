@@ -23,6 +23,8 @@ export const DEFAULT_RULES = [
   { id: 'dinner', kind: 'meal', title: '吃晚饭', mode: 'fixed', times: ['18:00'], enabled: true },
   { id: 'shower', kind: 'shower', title: '洗澡', mode: 'gap', minGapDays: 3, at: '22:30', enabled: true },
   { id: 'hair', kind: 'hair', title: '洗头', mode: 'gap', minGapDays: 3, at: '21:30', enabled: true },
+  // 起身：不看钟点，连续坐在电脑前坐满这么久提醒一次（靠活动采样，离开就重新计时）
+  { id: 'stand', kind: 'stretch', title: '起身', mode: 'sit', afterMin: 50, enabled: true },
   { id: 'sleep', kind: 'sleep', title: '该睡了', mode: 'fixed', times: ['23:30'], enabled: true },
 ]
 

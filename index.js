@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 
@@ -22,6 +23,100 @@ const PLAN_TIMEOUT_MS = 180000
 const AI_MAX_TOKENS = 128000
 const STORE_FILE = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'rigui-pro.json')
 const DAY = 86400000
+
+// ---------- 在不在电脑前 ----------
+// 只读系统的「最后一次输入时间」，不挂键盘钩子、不记按键、不看窗口标题。
+// 采样器是 native/idlewatch 编出来的几十 KB 小程序，随 DSH 启停，DSH 关掉它自己就退。
+const ACT_EVERY_S = 30 // 采样间隔
+const ACT_AWAY_MS = 5 * 60000 // 超过这么久没输入就算离开
+const ACT_FOCUS_MS = 10 * 60000 // 连续坐这么久算专注
+const ACT_SEAT_RESET_MS = 3 * 60000 // 离开超过这么久，久坐重新计时
+const SIT_AFTER_MIN = 50 // 连坐多久提醒起身
+const PLUGIN_DIR = (() => {
+  try { return dirname(fileURLToPath(import.meta.url)) } catch { return process.cwd() }
+})()
+
+function idlewatchPath() {
+  const cands = [
+    process.env.RIGUI_IDLEWATCH,
+    join(PLUGIN_DIR, 'native', 'idlewatch.exe'),
+    join(PLUGIN_DIR, 'node_modules', 'dsh-rigui-pro', 'native', 'idlewatch.exe'),
+    join(process.cwd(), 'native', 'idlewatch.exe'),
+  ].filter(Boolean)
+  for (const p of cands) { try { if (existsSync(p)) return p } catch {} }
+  return ''
+}
+
+function actDefaults() {
+  return { state: 'unknown', since: 0, seatStart: 0, waterMs: 0, focusMs: 0, day: '', lastIdle: 0, lastSampleAt: 0, helper: '' }
+}
+
+function readAct(s) { return { ...actDefaults(), ...((s && s.act) || {}) } }
+
+// 一次采样：更新状态、久坐起点、喝水累计、专注累计
+function feedSample(s, now, idle) {
+  const a = readAct(s)
+  const today = ymd(new Date(now))
+  if (a.day !== today) { a.day = today; a.focusMs = 0; a.waterMs = 0 }
+  const gap = a.lastSampleAt ? Math.max(0, Math.min(now - a.lastSampleAt, ACT_EVERY_S * 2000)) : 0
+  const wasUp = a.state === 'desk' || a.state === 'focus'
+  if (idle >= ACT_AWAY_MS) {
+    if (a.state !== 'away') { a.state = 'away'; a.since = now - idle }
+    a.seatStart = 0
+  } else {
+    if (!a.seatStart) a.seatStart = now - Math.min(idle, ACT_SEAT_RESET_MS)
+    const seated = now - a.seatStart
+    const next = seated >= ACT_FOCUS_MS ? 'focus' : 'desk'
+    if (next !== a.state) { a.state = next; a.since = now }
+    // 只在「上次采样时人也在」的间隔里累加，跨过离开的那一段不算
+    if (wasUp && gap) {
+      a.waterMs = (a.waterMs || 0) + gap
+      if (next === 'focus') a.focusMs = (a.focusMs || 0) + gap
+    }
+  }
+  a.lastIdle = idle
+  a.lastSampleAt = now
+  s.act = a
+  return a
+}
+
+// 交给界面的那一份
+function actView(s, now) {
+  const a = readAct(s)
+  return {
+    state: a.state,
+    since: a.since,
+    sinceMs: a.since ? Math.max(0, now - a.since) : 0,
+    seatMs: a.seatStart ? Math.max(0, now - a.seatStart) : 0,
+    focusMs: a.focusMs || 0,
+    waterMs: a.waterMs || 0,
+    idle: a.lastIdle || 0,
+    sampleAt: a.lastSampleAt || 0,
+    helper: a.helper || '',
+  }
+}
+
+// 喝水与起身这两件事按「在电脑前的时间」算，不看钟点：
+// - 喝水：上次喝水之后累计坐满 everyMin 分钟才提醒，离开的那段不算
+// - 起身：连续坐满 afterMin 分钟提醒一次，起来（离开 3 分钟以上）就重新计时
+// 返回 null 表示这条规则不归活动管，交给原来的钟点逻辑。
+function actDue(rule, s, now) {
+  if (rule.kind === 'water' && rule.mode === 'interval') {
+    if (readAct(s).state === 'away') return ''
+    const every = Math.max(15, rule.everyMin || 90) * 60000
+    if ((readAct(s).waterMs || 0) < every) return ''
+    return 'act:water@' + (lastLogOf(s, 'water', now) || 0)
+  }
+  if (rule.id === 'stand') {
+    const a = readAct(s)
+    if (!a.seatStart || a.state === 'away') return ''
+    const after = Math.max(15, Math.min(180, rule.afterMin || SIT_AFTER_MIN)) * 60000
+    if (now - a.seatStart < after) return ''
+    return 'act:stand@' + a.seatStart
+  }
+  return null
+}
+
 
 // ---------- 提示词 ----------
 
@@ -106,10 +201,11 @@ const DEFAULT_RULES = [
   { id: 'dinner', kind: 'meal', title: '吃晚饭', mode: 'fixed', times: ['18:00'], enabled: true },
   { id: 'shower', kind: 'shower', title: '洗澡', mode: 'gap', minGapDays: 3, at: '22:30', enabled: true },
   { id: 'hair', kind: 'hair', title: '洗头', mode: 'gap', minGapDays: 3, at: '21:30', enabled: true },
+  { id: 'stand', kind: 'stretch', title: '起身', mode: 'sit', afterMin: SIT_AFTER_MIN, enabled: true },
   { id: 'sleep', kind: 'sleep', title: '该睡了', mode: 'fixed', times: ['23:30'], enabled: true },
 ]
 
-const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], plans: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0, ai: { provider: '', model: '' }, voice: voiceDefaults() })
+const EMPTY = () => ({ version: 1, rules: DEFAULT_RULES.map((r) => ({ ...r })), logs: [], alarms: [], plans: [], fired: {}, prefs: { quiet: { from: '23:30', to: '07:30' }, system: true }, seenAt: 0, ai: { provider: '', model: '' }, voice: voiceDefaults(), act: actDefaults() })
 
 function readStore() {
   try {
@@ -119,12 +215,15 @@ function readStore() {
     if (!Array.isArray(s.rules) || !s.rules.length) s.rules = EMPTY().rules
     // 老版本把洗澡写成「每天 22:30」，现在按「洗完 3 天」算
     s.rules = s.rules.map((r) => (r && r.id === 'shower' && r.mode !== 'gap' ? { ...r, mode: 'gap', minGapDays: 3, at: '22:30' } : r))
+    // 老仓库里没有「起身」这条，补上
+    if (!s.rules.some((r) => r && r.id === 'stand')) s.rules.push({ ...DEFAULT_RULES.find((r) => r.id === 'stand') })
     if (!Array.isArray(s.logs)) s.logs = []
     if (!Array.isArray(s.alarms)) s.alarms = []
     if (!Array.isArray(s.plans)) s.plans = []
     if (!s.fired || typeof s.fired !== 'object') s.fired = {}
     s.prefs = { quiet: { from: '23:30', to: '07:30' }, system: true, ...(s.prefs || {}) }
     s.ai = { provider: '', model: '', ...(s.ai || {}) }
+    s.act = { ...actDefaults(), ...(s.act || {}) }
     return s
   } catch { return EMPTY() }
 }
@@ -620,6 +719,21 @@ function inQuiet(s, t) {
 function nextAt(rule, s, now) {
   if (!rule || rule.enabled === false) return 0
   const today = startOfDay(now)
+  // 喝水和起身按「在电脑前坐了多久」算，不按钟点
+  if (rule.kind === 'water' && rule.mode === 'interval') {
+    const a = readAct(s)
+    const from = minutesOf(rule.from) ?? 540, to = minutesOf(rule.to) ?? 1260
+    const d = new Date(now), mins = d.getHours() * 60 + d.getMinutes()
+    if (mins < from) return stampOf(today, from)
+    if (mins >= to) return stampOf(today + DAY, from)
+    const every = Math.max(15, rule.everyMin || 90) * 60000
+    return now + Math.max(1000, every - (a.waterMs || 0))
+  }
+  if (rule.id === 'stand') {
+    const a = readAct(s)
+    if (!a.seatStart) return 0
+    return a.seatStart + Math.max(15, Math.min(180, rule.afterMin || SIT_AFTER_MIN)) * 60000
+  }
   if (rule.mode === 'fixed') {
     let best = 0
     for (const t of rule.times || []) {
@@ -670,6 +784,18 @@ function fireKey(ruleId, at) { return ruleId + '@' + ymd(new Date(at)) + ' ' + h
 function tick(s, now) {
   const created = []
   for (const rule of s.rules) {
+    // 喝水、起身由活动状态驱动，用「累计坐着的时长」判，不走钟点
+    const actKey = actDue(rule, s, now)
+    if (actKey !== null) {
+      if (!actKey) continue
+      if (inQuiet(s, now) && rule.kind !== 'sleep') continue
+      if (s.fired[actKey]) continue
+      s.fired[actKey] = now
+      const actBody = bodyFor(rule, s, now)
+      s.alarms.push({ id: 'a' + now.toString(36) + Math.random().toString(36).slice(2, 5), ruleId: rule.id, kind: rule.kind, title: rule.title, body: actBody, at: now, firedAt: now, seenAt: 0 })
+      created.push({ title: rule.title, body: actBody })
+      continue
+    }
     const at = nextAt(rule, s, now)
     if (!at || at > now) continue
     if (inQuiet(s, now) && rule.kind !== 'sleep') continue
@@ -709,12 +835,17 @@ function tick(s, now) {
 }
 
 function bodyFor(rule, s, now) {
+  if (rule.id === 'stand') {
+    const a = readAct(s)
+    const mins = a.seatStart ? Math.max(1, Math.round((now - a.seatStart) / 60000)) : 0
+    return mins ? `坐 ${mins} 分钟了，起来走两步` : '起来走两步'
+  }
   if (rule.kind === 'water') {
     const last = lastLogOf(s, rule.kind, now)
     if (!last) return '今天还没喝水，先来一杯（约 250 ml）'
-    const mins = Math.max(1, Math.round((now - last) / 60000))
+    const seatMin = Math.round((readAct(s).waterMs || 0) / 60000)
     const cups = s.logs.filter((l) => l.kind === 'water' && l.at >= startOfDay(now)).length
-    return `距上次喝水 ${mins} 分钟，今天第 ${cups + 1} 杯`
+    return seatMin ? `在电脑前坐了 ${seatMin} 分钟没喝水，今天第 ${cups + 1} 杯` : `今天第 ${cups + 1} 杯`
   }
   if (rule.kind === 'hair') {
     const last = lastLogOf(s, rule.kind, now)
@@ -901,6 +1032,66 @@ export function apply(ctx) {
 
   const save = () => writeStore(store)
 
+  // ===== 活动采样：小程序随宿主启停，宿主一关它自己就退 =====
+  const watch = { child: null, tries: 0, retry: null, off: false }
+
+  function startWatch() {
+    if (watch.off || watch.child) return
+    const exe = idlewatchPath()
+    if (!exe) {
+      store.act = { ...readAct(store), helper: 'missing' }
+      return
+    }
+    let child = null
+    try {
+      child = spawn(exe, ['-parent', String(process.pid), '-every', String(ACT_EVERY_S)], {
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'ignore'],
+      })
+    } catch {
+      store.act = { ...readAct(store), helper: 'fail' }
+      return
+    }
+    watch.child = child
+    // 采样器不该把宿主吊住：DSH 该退就退，管道一断它自己收工
+    try { child.unref(); child.stdout.unref?.(); child.stdin.unref?.() } catch {}
+    store.act = { ...readAct(store), helper: 'ok' }
+    let buf = ''
+    child.stdout.on('data', (chunk) => {
+      buf += String(chunk)
+      let i
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim()
+        buf = buf.slice(i + 1)
+        if (!line) continue
+        try {
+          const j = JSON.parse(line)
+          if (!isFinite(+j.idle)) continue
+          feedSample(store, +j.t || Date.now(), Math.max(0, +j.idle))
+          save()
+        } catch {}
+      }
+    })
+    child.on('exit', () => {
+      watch.child = null
+      if (watch.off) return
+      store.act = { ...readAct(store), helper: watch.tries >= 3 ? 'fail' : 'down' }
+      save()
+      if (watch.tries >= 3) return
+      watch.tries += 1
+      clearTimeout(watch.retry)
+      watch.retry = setTimeout(startWatch, 60000)
+      if (typeof watch.retry.unref === 'function') watch.retry.unref()
+    })
+  }
+
+  function stopWatch() {
+    watch.off = true
+    clearTimeout(watch.retry)
+    try { if (watch.child) { watch.child.stdin.end(); watch.child.kill() } } catch {}
+    watch.child = null
+  }
+
   function runTick() {
     try {
       const now = Date.now()
@@ -937,8 +1128,14 @@ export function apply(ctx) {
     timer = setInterval(runTick, 15000)
     if (typeof timer.unref === 'function') timer.unref()
     setTimeout(runTick, 2500)
-    return () => { if (timer) clearInterval(timer) }
-  }, 'dsh-rigui-pro: 提醒调度')
+    const boot = setTimeout(startWatch, 1500)
+    if (typeof boot.unref === 'function') boot.unref()
+    return () => {
+      if (timer) clearInterval(timer)
+      clearTimeout(boot)
+      stopWatch()
+    }
+  }, 'dsh-rigui-pro: 提醒调度与活动采样')
 
   function statePayload(now) {
     const due = store.alarms.filter((a) => !a.seenAt && a.at <= now + 1000)
@@ -959,6 +1156,7 @@ export function apply(ctx) {
       today: {},
       ai: store.ai || { provider: '', model: '' },
       voice: readVoice(store),
+      activity: actView(store, now),
     }
   }
 
@@ -1037,6 +1235,26 @@ export function apply(ctx) {
       return { ok: true, result: { pick: store.ai || { provider: '', model: '' } } }
     }
 
+    // ---- 在不在电脑前 ----
+    if (body.endpoint === 'activity') {
+      const action = p.action || 'state'
+      if (action === 'sample') {
+        // 冒烟与调试用：把一次采样直接喂进状态机，不用真跑小程序
+        feedSample(store, Number(p.at) || now, Math.max(0, Number(p.idle) || 0))
+        save()
+        runTick()
+        return { ok: true, result: actView(store, Date.now()) }
+      }
+      if (action === 'restart') {
+        watch.tries = 0
+        stopWatch()
+        watch.off = false
+        startWatch()
+        return { ok: true, result: actView(store, Date.now()) }
+      }
+      return { ok: true, result: { ...actView(store, now), helperPath: idlewatchPath() } }
+    }
+
     // ---- 规律与提醒 ----
     if (body.endpoint === 'routine') {
       const action = p.action || 'state'
@@ -1052,16 +1270,22 @@ export function apply(ctx) {
             id: String(r.id || '').slice(0, 24) || 'r' + Math.random().toString(36).slice(2, 6),
             kind: String(r.kind || 'custom').slice(0, 16),
             title: String(r.title || '提醒').slice(0, 24),
-            mode: ['fixed', 'interval', 'gap'].includes(r.mode) ? r.mode : 'fixed',
+            mode: ['fixed', 'interval', 'gap', 'sit'].includes(r.mode) ? r.mode : 'fixed',
             times: Array.isArray(r.times) ? r.times.slice(0, 4).map((t) => String(t).slice(0, 5)) : undefined,
             everyMin: r.everyMin ? Math.max(15, Math.min(720, +r.everyMin)) : undefined,
             from: r.from ? String(r.from).slice(0, 5) : undefined,
             to: r.to ? String(r.to).slice(0, 5) : undefined,
             minGapDays: r.minGapDays ? Math.max(1, Math.min(60, +r.minGapDays)) : undefined,
             at: r.at ? String(r.at).slice(0, 5) : undefined,
+            afterMin: r.afterMin ? Math.max(15, Math.min(180, +r.afterMin)) : undefined,
             per: r.per ? +r.per : undefined,
             enabled: r.enabled !== false,
           }))
+          // 起身是这一版新加的：老客户端推上来的规则里没有它，别让它被覆盖没了
+          if (!store.rules.some((r) => r.id === 'stand')) {
+            const def = DEFAULT_RULES.find((r) => r.id === 'stand')
+            if (def) store.rules.push({ ...def })
+          }
           save()
         }
         return { ok: true, result: statePayload(now) }
@@ -1085,6 +1309,8 @@ export function apply(ctx) {
         if (kind) {
           store.logs.push({ id: 'l' + now.toString(36) + Math.random().toString(36).slice(2, 4), kind, at: Number(p.at) || now, amount: p.amount ? +p.amount : null })
           if (store.logs.length > 800) store.logs = store.logs.slice(-800)
+          // 真喝了一杯，喝水计时从现在重新起算（计时只算人在电脑前的时间）
+          if (kind === 'water') store.act = { ...readAct(store), waterMs: 0 }
           // 记了就算这轮提醒已经处理
           store.alarms.forEach((a) => { if (!a.seenAt && a.kind === kind) a.seenAt = now })
           save()

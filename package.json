@@ -15,7 +15,8 @@
     "client.js",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "native/idlewatch.exe"
   ],
   "keywords": [
     "dsh",
@@ -42,7 +43,8 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "build:native": "go build -C native/idlewatch -ldflags=-w -o ../idlewatch.exe main.go"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

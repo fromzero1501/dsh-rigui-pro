@@ -45,6 +45,14 @@ const CSS = `
 .rh-dot{width:6px;height:6px;border-radius:50%;background:#1E9E6A;flex:none;animation:rh-blink 2s ease-in-out infinite}
 @keyframes rh-blink{0%,100%{opacity:.35}50%{opacity:1}}
 .rh-rules{display:flex;flex-direction:column;gap:2px}
+.rh-act{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink2,#6B7280);font-variant-numeric:tabular-nums;white-space:nowrap}
+.rh-act i{width:7px;height:7px;border-radius:50%;background:#9AA0A6;flex:none}
+.rh-act.focus{color:#1E9E6A}
+.rh-act.focus i{background:#1E9E6A;box-shadow:0 0 0 3px rgba(30,158,106,.16);animation:rh-blink 2.2s ease-in-out infinite}
+.rh-act.desk i{background:#3B82C4}
+.rh-act.away{color:var(--ink3,#9AA0A6)}
+.rh-act.away i{background:#C9CDD2}
+.rh-act b{font-weight:600}
 .rh-rule{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--rule,rgba(31,35,40,.07))}
 .rh-rule:last-child{border-bottom:0}
 .rh-rule .n{flex:1;font-size:13.5px}
@@ -98,7 +106,7 @@ function Chip({ kind, voice, onSay, onLog, done, locked, title, lockHint, childr
 }
 
 export function RoutineCard({ ctx }) {
-  const { S, rules, onLog, next, voice, onSay } = ctx
+  const { S, rules, onLog, next, voice, onSay, act } = ctx
   const lastOf = (k) => (S.routines && S.routines.last && S.routines.last[k]) || null
   const daysOf = (r) => (r ? Math.floor((S.now - r.t) / 86400000) : null)
   const showerLast = lastOf('shower'), hairLast = lastOf('hair')
@@ -112,12 +120,27 @@ export function RoutineCard({ ctx }) {
   const showerWait = showerDays != null && showerDays < showerGap
   const hairWait = hairDays != null && hairDays < hairGap
 
+  // 在不在电脑前：只看系统的输入空闲时长，不看你在干什么
+  const helper = (act && act.helper) || ''
+  const broken = helper === 'missing' || helper === 'fail'
+  const st = broken ? 'off' : ((act && act.state) || 'unknown')
+  const mins = (ms) => Math.max(0, Math.round((ms || 0) / 60000))
+  const actText = st === 'focus'
+    ? <>专注中 <b>{mins(act.sinceMs)} 分钟</b></>
+    : st === 'desk'
+      ? <>在电脑前{mins(act && act.seatMs) >= 1 ? <> <b>{mins(act.seatMs)} 分钟</b></> : null}</>
+      : st === 'away'
+        ? <>{act && act.since ? fmtHM(act.since) + ' 离开的' : '离开了'}</>
+        : <>{helper === 'missing' ? '采样器没装' : '未在监测'}</>
+
   return (
     <>
       <style>{CSS}</style>
       <div className="lf-row" style={{ justifyContent: 'space-between', marginBottom: 2 }}>
         <h2 className="lf-h">日常</h2>
-        <span className="lf-sub">{showerDays != null ? '上次洗澡 ' + (showerDays === 0 ? '今天' : showerDays + ' 天前') : '还没记'}</span>
+        <span className={'rh-act ' + st} title={broken ? '没在采样，状态点不亮' : '按最近一次键鼠输入判断'}>
+          <i aria-hidden="true" />{actText}
+        </span>
       </div>
       <div className="rh-chips" style={{ marginTop: 12 }}>
         <Chip kind="shower" voice={voice} onSay={onSay} onLog={onLog} done={showerWait} locked={showerWait} title={'记一次洗澡（洗一次管 ' + showerGap + ' 天）'} lockHint={'（还差 ' + (showerGap - showerDays) + ' 天）'}>
@@ -198,7 +221,7 @@ export function WaterCard({ ctx }) {
 }
 
 // 背面只剩提醒节奏；语音那套搬到独立面板（src/voice.jsx），入口在页面顶部。
-export function BackRoutine({ rules, onToggle, onEvery, onGap }) {
+export function BackRoutine({ rules, onToggle, onEvery, onGap, onSit }) {
   return (
     <>
       <style>{CSS}</style>
@@ -218,6 +241,12 @@ export function BackRoutine({ rules, onToggle, onEvery, onGap }) {
                 <button type="button" className="rh-step" onClick={() => onGap(r.id, -1)} aria-label="少一天">−</button>
                 <span className="t">{r.minGapDays} 天</span>
                 <button type="button" className="rh-step" onClick={() => onGap(r.id, 1)} aria-label="多一天">+</button>
+              </span>
+            ) : r.mode === 'sit' ? (
+              <span className="lf-row" style={{ gap: 4 }}>
+                <button type="button" className="rh-step" onClick={() => onSit(r.id, -10)} aria-label="少十分钟">−</button>
+                <span className="t">坐 {r.afterMin} 分钟</span>
+                <button type="button" className="rh-step" onClick={() => onSit(r.id, 10)} aria-label="多十分钟">+</button>
               </span>
             ) : (
               <span className="t">{(r.times || []).join(' · ')}</span>
