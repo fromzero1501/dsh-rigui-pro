@@ -46,8 +46,7 @@ const CSS = `
 .md-body{position:relative;flex:1;width:100%;margin-top:2px;border:1.5px solid rgba(31,35,40,.16);border-radius:7px 7px 12px 12px;background:linear-gradient(to bottom,#FFFFFF,#F6F8FA);overflow:hidden;min-height:0;box-shadow:inset 0 1px 3px rgba(31,35,40,.05)}
 .md-pot.empty .md-body{border-style:dashed;opacity:.55}
 .md-slots{position:absolute;inset:4px}
-.md-pill{position:absolute;width:12px;height:12px;border-radius:50%;border:1px solid color-mix(in srgb,var(--pc,#9AA1AA) 74%,#6F7B87);box-sizing:border-box;background:color-mix(in srgb,var(--pc,#9AA1AA) 84%,#9AA5B1);box-shadow:inset 0 -2px 3px rgba(31,35,40,.20),0 1px 2px rgba(31,35,40,.16);transform:translate(-50%,-50%) rotate(var(--rot,0deg));transition:opacity .24s ease,filter .24s ease;pointer-events:none}
-.md-pill::after{content:"";position:absolute;left:50%;top:50%;width:7px;height:1.4px;border-radius:1px;background:rgba(31,35,40,.13);transform:translate(-50%,-50%)}
+.md-pill{position:absolute;width:15px;height:8px;border-radius:4px;box-sizing:border-box;background:linear-gradient(180deg,rgba(255,255,255,.20) 0%,rgba(255,255,255,0) 52%,rgba(31,35,40,.10) 100%),linear-gradient(90deg,color-mix(in srgb,var(--pc,#9AA1AA) 88%,#9AA5B1) 0 50%,#F1F5F9 50% 100%);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pc,#9AA1AA) 42%,#B4C0CD),0 1px 1.5px rgba(31,35,40,.20);transform:translate(-50%,-50%) rotate(var(--rot,0deg));transition:opacity .24s ease,filter .24s ease;pointer-events:none}
 .md-pill.on{opacity:0;filter:blur(.6px)}
 .md-legend{display:flex;flex-direction:column;gap:1px;min-width:0}
 .md-row{display:flex;align-items:center;gap:2px;min-width:0}
@@ -206,16 +205,16 @@ const MED_COLORS = ['#E2604C', '#3B82C4', '#1E9E6A', '#8B6BD9', '#D9963A', '#4C8
 // 药瓶里药片的固定落点：四层从瓶底往上堆，层与层错开半个药片，各自带一点倾角。
 // 序号即「第几颗药」，吃掉的只是把自己淡下去，坐标不动，其它药片不会被推着走。
 const PILL_SLOTS = [
-  { x: 22, y: 87, r: -12 },
-  { x: 50, y: 88, r: 4 },
-  { x: 78, y: 86, r: 16 },
-  { x: 34, y: 70, r: -18 },
-  { x: 66, y: 69, r: 22 },
-  { x: 22, y: 53, r: 10 },
-  { x: 50, y: 52, r: -14 },
-  { x: 78, y: 54, r: 20 },
-  { x: 34, y: 36, r: -22 },
-  { x: 66, y: 35, r: 8 },
+  { x: 30, y: 88, r: -16 },
+  { x: 70, y: 87, r: 12 },
+  { x: 26, y: 74, r: 8 },
+  { x: 72, y: 73, r: -20 },
+  { x: 34, y: 60, r: -10 },
+  { x: 66, y: 61, r: 18 },
+  { x: 28, y: 46, r: 14 },
+  { x: 72, y: 45, r: -8 },
+  { x: 38, y: 32, r: -18 },
+  { x: 64, y: 31, r: 6 },
 ]
 
 export function WaterCard({ ctx }) {
@@ -378,7 +377,7 @@ export function BackWaterMeds({ meds, onChange }) {
       {local.length < 6 ? (
         <button type="button" className="rh-open md-add" onClick={add}>+ 加一种药</button>
       ) : null}
-      <p className="rh-note">一天几次就放几片药，药片位置是固定的，吃一片淡一片。药名点一下记一次，旁边的减号撤回。名字最多 12 个字，最多 6 种药。</p>
+      <p className="rh-note">一天几次就放几粒胶囊，位置是固定的，吃一粒淡一粒。药名点一下记一次，旁边的减号撤回。名字最多 12 个字，最多 6 种药。</p>
     </>
   )
 }
