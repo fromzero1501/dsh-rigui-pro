@@ -353,6 +353,7 @@ export default function LifeApp() {
   const [plan, setPlan] = useState({ open: false, busy: false, draft: null, error: '', date: '', text: '' })
   const [aiList, setAiList] = useState({ providers: [], auto: { provider: '', model: '' } })
   const [aiPick, setAiPick] = useState({ provider: '', model: '' })
+  const [wIn, setWIn] = useState('')
   const rootRef = useRef(null), inputRef = useRef(null), refs = useRef({})
 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
@@ -638,6 +639,14 @@ export default function LifeApp() {
     say(ml ? '记下了：' + routineName(kind) + ' ' + ml + ' ml' : '记下了：' + routineName(kind))
     pushRoutine({ action: 'log', kind, at: t, amount: ml })
   }, [commit, pushRoutine])
+
+  // 在体重卡上直接记一笔（不用说话）
+  const addWeight = useCallback((kg) => {
+    const v = Math.round(kg * 10) / 10
+    const rec = { id: uid(), type: 'weight', t: Date.now(), kg: v, title: '体重 ' + v + ' kg' }
+    commit([rec], cardsFor([rec]))
+    say('记下了：体重 ' + v + ' kg')
+  }, [commit])
 
   // 规则一动就告诉主机半边，它按这个算下一次提醒
   useEffect(() => { saveRules(rules); pushRoutine({ action: 'rules', rules }) }, [rules, pushRoutine])
@@ -1348,8 +1357,24 @@ export default function LifeApp() {
             </div>
             <div data-ev="body.line" style={{ flex: 1, minHeight: 56, margin: '4px 0 8px' }}><WeightScrub weights={S.weights} now={S.now}><WeightLine weights={S.weights} now={S.now} /></WeightScrub></div>
             <span style={{ fontSize: 13, color: S.wDelta != null && S.wDelta <= 0 ? 'var(--move-ink)' : 'var(--ink2)' }}>
-              {goals.adopted.monthWeight && S.wNow != null ? 'Boss 战：30 天到 ' + goals.monthWeight + ' kg，' + (S.wNow <= goals.monthWeight ? '已经打赢了' : '还差 ' + (S.wNow - goals.monthWeight).toFixed(1) + ' kg') : S.wDelta == null ? (S.wNow != null ? '记满一周就能看到变化' : '说「体重 68.2」开始记录') : '一周 ' + (S.wDelta <= 0 ? '−' : '+') + Math.abs(S.wDelta).toFixed(1) + ' kg'}
+              {goals.adopted.monthWeight && S.wNow != null ? 'Boss 战：30 天到 ' + goals.monthWeight + ' kg，' + (S.wNow <= goals.monthWeight ? '已经打赢了' : '还差 ' + (S.wNow - goals.monthWeight).toFixed(1) + ' kg') : S.wDelta == null ? (S.wNow != null ? '记满一周就能看到变化' : '记一次就有线了') : '一周 ' + (S.wDelta <= 0 ? '−' : '+') + Math.abs(S.wDelta).toFixed(1) + ' kg'}
             </span>
+            {/* 就地录一体重：浮在雾层之上（z-index 3），擦不擦玻璃都能填 */}
+            <form
+              className="lf-wform"
+              onSubmit={(e) => { e.preventDefault(); const v = parseFloat(String(wIn).replace(/[^\d.]/g, '')); if (!(v >= 25 && v <= 250)) { say('体重填 25–250 之间'); return } addWeight(v); setWIn('') }}
+              style={{ position: 'relative', zIndex: 3, display: 'flex', gap: 6, alignItems: 'center', marginTop: 10, alignSelf: 'flex-start' }}
+            >
+              <input
+                value={wIn}
+                onChange={(e) => setWIn(e.target.value)}
+                inputMode="decimal"
+                placeholder="今天多少 kg"
+                aria-label="今天的体重，单位 kg"
+                style={{ width: 108, height: 32, padding: '0 10px', borderRadius: 10, border: '1px solid var(--rule)', background: 'var(--fill2,rgba(255,255,255,.72))', color: 'var(--ink)', font: 'inherit', fontSize: 13 }}
+              />
+              <button type="submit" style={{ height: 32, padding: '0 13px', borderRadius: 10, border: 0, background: '#0E6E6E', color: '#F4F5F1', font: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>记下</button>
+            </form>
           </Card>
 
           {/* 这周 */}

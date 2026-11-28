@@ -104,7 +104,7 @@ const DEFAULT_RULES = [
   { id: 'breakfast', kind: 'meal', title: '吃早饭', mode: 'fixed', times: ['07:30'], enabled: true },
   { id: 'lunch', kind: 'meal', title: '吃午饭', mode: 'fixed', times: ['12:00'], enabled: true },
   { id: 'dinner', kind: 'meal', title: '吃晚饭', mode: 'fixed', times: ['18:00'], enabled: true },
-  { id: 'shower', kind: 'shower', title: '洗澡', mode: 'fixed', times: ['22:30'], enabled: true },
+  { id: 'shower', kind: 'shower', title: '洗澡', mode: 'gap', minGapDays: 3, at: '22:30', enabled: true },
   { id: 'hair', kind: 'hair', title: '洗头', mode: 'gap', minGapDays: 3, at: '21:30', enabled: true },
   { id: 'sleep', kind: 'sleep', title: '该睡了', mode: 'fixed', times: ['23:30'], enabled: true },
 ]
@@ -117,6 +117,8 @@ function readStore() {
     const raw = JSON.parse(readFileSync(STORE_FILE, 'utf8'))
     const s = { ...EMPTY(), ...raw }
     if (!Array.isArray(s.rules) || !s.rules.length) s.rules = EMPTY().rules
+    // 老版本把洗澡写成「每天 22:30」，现在按「洗完 3 天」算
+    s.rules = s.rules.map((r) => (r && r.id === 'shower' && r.mode !== 'gap' ? { ...r, mode: 'gap', minGapDays: 3, at: '22:30' } : r))
     if (!Array.isArray(s.logs)) s.logs = []
     if (!Array.isArray(s.alarms)) s.alarms = []
     if (!Array.isArray(s.plans)) s.plans = []

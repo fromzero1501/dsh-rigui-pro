@@ -21,17 +21,23 @@ export const DEFAULT_RULES = [
   { id: 'breakfast', kind: 'meal', title: '吃早饭', mode: 'fixed', times: ['07:30'], enabled: true },
   { id: 'lunch', kind: 'meal', title: '吃午饭', mode: 'fixed', times: ['12:00'], enabled: true },
   { id: 'dinner', kind: 'meal', title: '吃晚饭', mode: 'fixed', times: ['18:00'], enabled: true },
-  { id: 'shower', kind: 'shower', title: '洗澡', mode: 'fixed', times: ['22:30'], enabled: true },
+  { id: 'shower', kind: 'shower', title: '洗澡', mode: 'gap', minGapDays: 3, at: '22:30', enabled: true },
   { id: 'hair', kind: 'hair', title: '洗头', mode: 'gap', minGapDays: 3, at: '21:30', enabled: true },
   { id: 'sleep', kind: 'sleep', title: '该睡了', mode: 'fixed', times: ['23:30'], enabled: true },
 ]
+
+// 老版本把洗澡写成「每天 22:30」；现在改成和洗头一样按间隔算，读到旧的自动换过来
+function migrate(r) {
+  if (r && r.id === 'shower' && r.mode !== 'gap') return { ...r, mode: 'gap', minGapDays: 3, at: '22:30', times: undefined }
+  return r
+}
 
 export function loadRules() {
   try {
     const v = JSON.parse(localStorage.getItem(RULES_KEY))
     if (Array.isArray(v) && v.length) {
       const ids = new Set(v.map((r) => r && r.id))
-      return v.filter((r) => r && r.id).concat(DEFAULT_RULES.filter((r) => !ids.has(r.id)))
+      return v.filter((r) => r && r.id).concat(DEFAULT_RULES.filter((r) => !ids.has(r.id))).map(migrate)
     }
   } catch (e) {}
   return DEFAULT_RULES.map((r) => ({ ...r }))

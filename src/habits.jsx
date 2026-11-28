@@ -84,23 +84,28 @@ function Chip({ kind, voice, onSay, onLog, done, locked, title, children }) {
 export function RoutineCard({ ctx }) {
   const { S, rules, onLog, next, voice, onSay } = ctx
   const water = (S.routines && S.routines.today && S.routines.today.water) || { count: 0, ml: 0, lastAt: 0 }
-  const shower = (S.routines && S.routines.today && S.routines.today.shower) || null
-  const hair = (S.routines && S.routines.last && S.routines.last.hair) || null
-  const hairDays = hair ? Math.floor((S.now - hair.t) / 86400000) : null
+  const lastOf = (k) => (S.routines && S.routines.last && S.routines.last[k]) || null
+  const daysOf = (r) => (r ? Math.floor((S.now - r.t) / 86400000) : null)
+  const showerLast = lastOf('shower'), hairLast = lastOf('hair')
+  const showerDays = daysOf(showerLast), hairDays = daysOf(hairLast)
   const cups = 8
   const filled = Math.min(cups, Math.round(water.ml / 250) || water.count)
   const soon = useMemo(() => (next || []).filter((n) => n.at > S.now).sort((a, b) => a.at - b.at)[0], [next, S.now])
+  const showerRule = (rules || []).find((r) => r.id === 'shower')
   const hairRule = (rules || []).find((r) => r.id === 'hair')
-  // 今天已经记过的就不再让点（洗澡洗头一天一次，喝水记满 8 杯就停）
+  const showerGap = (showerRule && showerRule.minGapDays) || 3
+  const hairGap = (hairRule && hairRule.minGapDays) || 3
+  // 喝水：点一次加一杯，满 8 杯就停；洗澡洗头：洗完 3 天内不用再记
   const waterFull = water.ml >= 2000 || water.count >= 8
-  const hairToday = hairDays === 0
+  const showerWait = showerDays != null && showerDays < showerGap
+  const hairWait = hairDays != null && hairDays < hairGap
 
   return (
     <>
       <style>{CSS}</style>
       <div className="lf-row" style={{ justifyContent: 'space-between', marginBottom: 2 }}>
         <h2 className="lf-h">日常</h2>
-        <span className="lf-sub">{water.ml ? water.ml + ' ml' : water.count ? water.count + ' 次' : '还没记'}</span>
+        <span className="lf-sub">{water.ml ? water.ml + ' ml' : water.count ? water.count + ' 杯' : '还没记'}</span>
       </div>
       <div className="rh-cups" aria-hidden="true">
         {Array.from({ length: cups }, (_, i) => (
@@ -109,13 +114,13 @@ export function RoutineCard({ ctx }) {
       </div>
       <div className="rh-chips">
         <Chip kind="water" voice={voice} onSay={onSay} onLog={onLog} done={!!water.count} locked={waterFull} title="记一杯水">
-          {drop('#3B82C4')}喝水 {water.count ? <b>{water.count} 次</b> : null}
+          {drop('#3B82C4')}喝水 {water.count ? <b>{water.count} 杯</b> : null}
         </Chip>
-        <Chip kind="shower" voice={voice} onSay={onSay} onLog={onLog} done={!!shower} locked={!!shower} title="记一次洗澡">
-          {drop('#3D4FB8')}洗澡
+        <Chip kind="shower" voice={voice} onSay={onSay} onLog={onLog} done={showerWait} locked={showerWait} title={'记一次洗澡（洗一次管 ' + showerGap + ' 天）'}>
+          {drop('#3D4FB8')}洗澡{showerDays != null ? <b>{showerDays === 0 ? '今天' : showerDays + ' 天前'}</b> : null}
         </Chip>
-        <Chip kind="hair" voice={voice} onSay={onSay} onLog={onLog} done={hairDays != null && hairRule && hairDays < (hairRule.minGapDays || 3)} locked={hairToday} title="记一次洗头">
-          {drop('#7C5CE0')}洗头{hairDays != null ? <b>{hairDays} 天前</b> : null}
+        <Chip kind="hair" voice={voice} onSay={onSay} onLog={onLog} done={hairWait} locked={hairWait} title={'记一次洗头（洗一次管 ' + hairGap + ' 天）'}>
+          {drop('#7C5CE0')}洗头{hairDays != null ? <b>{hairDays === 0 ? '今天' : hairDays + ' 天前'}</b> : null}
         </Chip>
       </div>
       <div className="rh-line">
@@ -125,7 +130,7 @@ export function RoutineCard({ ctx }) {
         {water.lastAt ? <span>{fmtHM(water.lastAt)} 喝过</span> : null}
       </div>
       <div className="rh-foot">
-        <p className="rh-note">喇叭亮着就会念；点一下先听，再点一下这件事就不念。今天记过的按钮会灰掉。</p>
+        <p className="rh-note">喇叭亮着就会念；点一下先听，再点一下这件事就不念。喝水满 8 杯、洗澡洗头不满 3 天的按钮会灰掉。</p>
       </div>
     </>
   )

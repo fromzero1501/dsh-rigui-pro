@@ -4818,16 +4818,20 @@ var DEFAULT_RULES = [
   { id: "breakfast", kind: "meal", title: "吃早饭", mode: "fixed", times: ["07:30"], enabled: true },
   { id: "lunch", kind: "meal", title: "吃午饭", mode: "fixed", times: ["12:00"], enabled: true },
   { id: "dinner", kind: "meal", title: "吃晚饭", mode: "fixed", times: ["18:00"], enabled: true },
-  { id: "shower", kind: "shower", title: "洗澡", mode: "fixed", times: ["22:30"], enabled: true },
+  { id: "shower", kind: "shower", title: "洗澡", mode: "gap", minGapDays: 3, at: "22:30", enabled: true },
   { id: "hair", kind: "hair", title: "洗头", mode: "gap", minGapDays: 3, at: "21:30", enabled: true },
   { id: "sleep", kind: "sleep", title: "该睡了", mode: "fixed", times: ["23:30"], enabled: true }
 ];
+function migrate(r) {
+  if (r && r.id === "shower" && r.mode !== "gap") return { ...r, mode: "gap", minGapDays: 3, at: "22:30", times: void 0 };
+  return r;
+}
 function loadRules() {
   try {
     const v = JSON.parse(localStorage.getItem(RULES_KEY));
     if (Array.isArray(v) && v.length) {
       const ids = new Set(v.map((r) => r && r.id));
-      return v.filter((r) => r && r.id).concat(DEFAULT_RULES.filter((r) => !ids.has(r.id)));
+      return v.filter((r) => r && r.id).concat(DEFAULT_RULES.filter((r) => !ids.has(r.id))).map(migrate);
     }
   } catch (e) {
   }
@@ -5067,16 +5071,21 @@ function Chip({ kind, voice, onSay, onLog, done, locked, title, children }) {
 function RoutineCard({ ctx }) {
   const { S: S2, rules, onLog, next, voice, onSay } = ctx;
   const water = S2.routines && S2.routines.today && S2.routines.today.water || { count: 0, ml: 0, lastAt: 0 };
-  const shower = S2.routines && S2.routines.today && S2.routines.today.shower || null;
-  const hair = S2.routines && S2.routines.last && S2.routines.last.hair || null;
-  const hairDays = hair ? Math.floor((S2.now - hair.t) / 864e5) : null;
+  const lastOf = (k) => S2.routines && S2.routines.last && S2.routines.last[k] || null;
+  const daysOf = (r) => r ? Math.floor((S2.now - r.t) / 864e5) : null;
+  const showerLast = lastOf("shower"), hairLast = lastOf("hair");
+  const showerDays = daysOf(showerLast), hairDays = daysOf(hairLast);
   const cups = 8;
   const filled = Math.min(cups, Math.round(water.ml / 250) || water.count);
   const soon = (0, import_react10.useMemo)(() => (next || []).filter((n) => n.at > S2.now).sort((a, b) => a.at - b.at)[0], [next, S2.now]);
+  const showerRule = (rules || []).find((r) => r.id === "shower");
   const hairRule = (rules || []).find((r) => r.id === "hair");
+  const showerGap = showerRule && showerRule.minGapDays || 3;
+  const hairGap = hairRule && hairRule.minGapDays || 3;
   const waterFull = water.ml >= 2e3 || water.count >= 8;
-  const hairToday = hairDays === 0;
-  return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 2 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "日常"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, water.ml ? water.ml + " ml" : water.count ? water.count + " 次" : "还没记")), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-cups", "aria-hidden": "true" }, Array.from({ length: cups }, (_, i) => /* @__PURE__ */ import_react10.default.createElement("span", { key: i, className: "rh-cup" + (i < filled ? " on" : ""), style: { height: 12 + i * 4 } }))), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-chips" }, /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "water", voice, onSay, onLog, done: !!water.count, locked: waterFull, title: "记一杯水" }, drop("#3B82C4"), "喝水 ", water.count ? /* @__PURE__ */ import_react10.default.createElement("b", null, water.count, " 次") : null), /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "shower", voice, onSay, onLog, done: !!shower, locked: !!shower, title: "记一次洗澡" }, drop("#3D4FB8"), "洗澡"), /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "hair", voice, onSay, onLog, done: hairDays != null && hairRule && hairDays < (hairRule.minGapDays || 3), locked: hairToday, title: "记一次洗头" }, drop("#7C5CE0"), "洗头", hairDays != null ? /* @__PURE__ */ import_react10.default.createElement("b", null, hairDays, " 天前") : null)), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-line" }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-next" }, soon ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-dot" }), fmtHM2(soon.at), " ", soon.title) : /* @__PURE__ */ import_react10.default.createElement("span", null, "今天的都过了")), water.lastAt ? /* @__PURE__ */ import_react10.default.createElement("span", null, fmtHM2(water.lastAt), " 喝过") : null), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-foot" }, /* @__PURE__ */ import_react10.default.createElement("p", { className: "rh-note" }, "喇叭亮着就会念；点一下先听，再点一下这件事就不念。今天记过的按钮会灰掉。")));
+  const showerWait = showerDays != null && showerDays < showerGap;
+  const hairWait = hairDays != null && hairDays < hairGap;
+  return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 2 } }, /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h" }, "日常"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-sub" }, water.ml ? water.ml + " ml" : water.count ? water.count + " 杯" : "还没记")), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-cups", "aria-hidden": "true" }, Array.from({ length: cups }, (_, i) => /* @__PURE__ */ import_react10.default.createElement("span", { key: i, className: "rh-cup" + (i < filled ? " on" : ""), style: { height: 12 + i * 4 } }))), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-chips" }, /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "water", voice, onSay, onLog, done: !!water.count, locked: waterFull, title: "记一杯水" }, drop("#3B82C4"), "喝水 ", water.count ? /* @__PURE__ */ import_react10.default.createElement("b", null, water.count, " 杯") : null), /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "shower", voice, onSay, onLog, done: showerWait, locked: showerWait, title: "记一次洗澡（洗一次管 " + showerGap + " 天）" }, drop("#3D4FB8"), "洗澡", showerDays != null ? /* @__PURE__ */ import_react10.default.createElement("b", null, showerDays === 0 ? "今天" : showerDays + " 天前") : null), /* @__PURE__ */ import_react10.default.createElement(Chip, { kind: "hair", voice, onSay, onLog, done: hairWait, locked: hairWait, title: "记一次洗头（洗一次管 " + hairGap + " 天）" }, drop("#7C5CE0"), "洗头", hairDays != null ? /* @__PURE__ */ import_react10.default.createElement("b", null, hairDays === 0 ? "今天" : hairDays + " 天前") : null)), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-line" }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-next" }, soon ? /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("span", { className: "rh-dot" }), fmtHM2(soon.at), " ", soon.title) : /* @__PURE__ */ import_react10.default.createElement("span", null, "今天的都过了")), water.lastAt ? /* @__PURE__ */ import_react10.default.createElement("span", null, fmtHM2(water.lastAt), " 喝过") : null), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-foot" }, /* @__PURE__ */ import_react10.default.createElement("p", { className: "rh-note" }, "喇叭亮着就会念；点一下先听，再点一下这件事就不念。喝水满 8 杯、洗澡洗头不满 3 天的按钮会灰掉。")));
 }
 function BackRoutine({ rules, onToggle, onEvery, onGap }) {
   return /* @__PURE__ */ import_react10.default.createElement(import_react10.default.Fragment, null, /* @__PURE__ */ import_react10.default.createElement("style", null, CSS4), /* @__PURE__ */ import_react10.default.createElement("h2", { className: "lf-h", style: { marginBottom: 8 } }, "提醒怎么设"), /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-rules" }, (rules || []).map((r) => /* @__PURE__ */ import_react10.default.createElement("div", { className: "rh-rule", key: r.id }, /* @__PURE__ */ import_react10.default.createElement("span", { className: "n" }, r.title), r.mode === "interval" ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 4 } }, /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onEvery(r.id, -15), "aria-label": "少十五分钟" }, "−"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "t" }, r.everyMin, " 分钟"), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onEvery(r.id, 15), "aria-label": "多十五分钟" }, "+")) : r.mode === "gap" ? /* @__PURE__ */ import_react10.default.createElement("span", { className: "lf-row", style: { gap: 4 } }, /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onGap(r.id, -1), "aria-label": "少一天" }, "−"), /* @__PURE__ */ import_react10.default.createElement("span", { className: "t" }, r.minGapDays, " 天"), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-step", onClick: () => onGap(r.id, 1), "aria-label": "多一天" }, "+")) : /* @__PURE__ */ import_react10.default.createElement("span", { className: "t" }, (r.times || []).join(" · ")), /* @__PURE__ */ import_react10.default.createElement("button", { type: "button", className: "rh-sw" + (r.enabled !== false ? " on" : ""), onClick: () => onToggle(r.id), "aria-label": r.enabled !== false ? "关掉" : "打开", "aria-pressed": r.enabled !== false })))), /* @__PURE__ */ import_react10.default.createElement("p", { className: "rh-note" }, "点一下就记下，记完自动顺延；面板关着也会弹系统提醒。待办和日程到点同样会提醒。"));
@@ -5513,6 +5522,7 @@ function LifeApp() {
   const [plan, setPlan] = (0, import_react11.useState)({ open: false, busy: false, draft: null, error: "", date: "", text: "" });
   const [aiList, setAiList] = (0, import_react11.useState)({ providers: [], auto: { provider: "", model: "" } });
   const [aiPick, setAiPick] = (0, import_react11.useState)({ provider: "", model: "" });
+  const [wIn, setWIn] = (0, import_react11.useState)("");
   const rootRef = (0, import_react11.useRef)(null), inputRef = (0, import_react11.useRef)(null), refs = (0, import_react11.useRef)({});
   (0, import_react11.useEffect)(() => {
     const t = setInterval(() => setNow(Date.now()), 3e4);
@@ -5881,6 +5891,12 @@ function LifeApp() {
     say(ml ? "记下了：" + routineName(kind) + " " + ml + " ml" : "记下了：" + routineName(kind));
     pushRoutine({ action: "log", kind, at: t, amount: ml });
   }, [commit, pushRoutine]);
+  const addWeight = (0, import_react11.useCallback)((kg) => {
+    const v = Math.round(kg * 10) / 10;
+    const rec = { id: uid(), type: "weight", t: Date.now(), kg: v, title: "体重 " + v + " kg" };
+    commit([rec], cardsFor([rec]));
+    say("记下了：体重 " + v + " kg");
+  }, [commit]);
   (0, import_react11.useEffect)(() => {
     saveRules(rules);
     pushRoutine({ action: "rules", rules });
@@ -6599,7 +6615,35 @@ function LifeApp() {
     },
     /* @__PURE__ */ import_react11.default.createElement("span", { "data-ev": "insight." + it.id, style: { display: "flex", alignItems: "center", paddingTop: 4, flex: "none", alignSelf: "flex-start" } }, /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-dot", style: { background: it.from === "time" ? "var(--ink)" : C2[it.from], width: 10, height: 10, borderRadius: 5 } }), /* @__PURE__ */ import_react11.default.createElement("span", { style: { width: 12, height: 2, background: "var(--line)" } }), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-dot", style: { background: it.to === "time" ? "var(--ink)" : C2[it.to], width: 10, height: 10, borderRadius: 5 } })),
     /* @__PURE__ */ import_react11.default.createElement("span", { style: { fontSize: 14, lineHeight: 1.55, color: it.tone === "warn" ? "var(--warn-ink)" : C2.ink } }, it.text)
-  )))), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("body", 8), cls: "s3", back: /* @__PURE__ */ import_react11.default.createElement(import_react11.default.Fragment, null, /* @__PURE__ */ import_react11.default.createElement(BackBody, { S: S2, monthWeight: goals.adopted.monthWeight ? goals.monthWeight : null }), S2.wNow != null && /* @__PURE__ */ import_react11.default.createElement(WeightFog, null)) }, S2.wNow != null && /* @__PURE__ */ import_react11.default.createElement(WeightFog, null), /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "体重"), /* @__PURE__ */ import_react11.default.createElement("div", { "data-ev": "body.num", style: { display: "flex", alignItems: "baseline", gap: 6, margin: "12px 0 8px", alignSelf: "flex-start" } }, S2.wNow != null ? /* @__PURE__ */ import_react11.default.createElement(Num, { value: S2.wNow, format: (v) => v.toFixed(1), style: { fontSize: 44, fontWeight: 500, lineHeight: 1 } }) : /* @__PURE__ */ import_react11.default.createElement("span", { style: { fontSize: 28, fontWeight: 500 } }, "—"), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, "kg")), /* @__PURE__ */ import_react11.default.createElement("div", { "data-ev": "body.line", style: { flex: 1, minHeight: 56, margin: "4px 0 8px" } }, /* @__PURE__ */ import_react11.default.createElement(WeightScrub, { weights: S2.weights, now: S2.now }, /* @__PURE__ */ import_react11.default.createElement(WeightLine, { weights: S2.weights, now: S2.now }))), /* @__PURE__ */ import_react11.default.createElement("span", { style: { fontSize: 13, color: S2.wDelta != null && S2.wDelta <= 0 ? "var(--move-ink)" : "var(--ink2)" } }, goals.adopted.monthWeight && S2.wNow != null ? "Boss 战：30 天到 " + goals.monthWeight + " kg，" + (S2.wNow <= goals.monthWeight ? "已经打赢了" : "还差 " + (S2.wNow - goals.monthWeight).toFixed(1) + " kg") : S2.wDelta == null ? S2.wNow != null ? "记满一周就能看到变化" : "说「体重 68.2」开始记录" : "一周 " + (S2.wDelta <= 0 ? "−" : "+") + Math.abs(S2.wDelta).toFixed(1) + " kg")), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("week", 9), cls: "s8" }, /* @__PURE__ */ import_react11.default.createElement(WeekBoard, { S: S2 })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("todos", 10), cls: "s4", back: /* @__PURE__ */ import_react11.default.createElement(BackTodos, { records: db.records, today: S2.today, onRestore: unarchiveTodo }) }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 6 } }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "要做的事"), S2.todos.some((x) => x.done) || pend ? /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-row", style: { gap: 10 } }, !pend && /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, S2.todos.filter((x) => x.done).length, " / ", S2.todos.length, " 完成"), /* @__PURE__ */ import_react11.default.createElement(
+  )))), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("body", 8), cls: "s3", back: /* @__PURE__ */ import_react11.default.createElement(import_react11.default.Fragment, null, /* @__PURE__ */ import_react11.default.createElement(BackBody, { S: S2, monthWeight: goals.adopted.monthWeight ? goals.monthWeight : null }), S2.wNow != null && /* @__PURE__ */ import_react11.default.createElement(WeightFog, null)) }, S2.wNow != null && /* @__PURE__ */ import_react11.default.createElement(WeightFog, null), /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "体重"), /* @__PURE__ */ import_react11.default.createElement("div", { "data-ev": "body.num", style: { display: "flex", alignItems: "baseline", gap: 6, margin: "12px 0 8px", alignSelf: "flex-start" } }, S2.wNow != null ? /* @__PURE__ */ import_react11.default.createElement(Num, { value: S2.wNow, format: (v) => v.toFixed(1), style: { fontSize: 44, fontWeight: 500, lineHeight: 1 } }) : /* @__PURE__ */ import_react11.default.createElement("span", { style: { fontSize: 28, fontWeight: 500 } }, "—"), /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, "kg")), /* @__PURE__ */ import_react11.default.createElement("div", { "data-ev": "body.line", style: { flex: 1, minHeight: 56, margin: "4px 0 8px" } }, /* @__PURE__ */ import_react11.default.createElement(WeightScrub, { weights: S2.weights, now: S2.now }, /* @__PURE__ */ import_react11.default.createElement(WeightLine, { weights: S2.weights, now: S2.now }))), /* @__PURE__ */ import_react11.default.createElement("span", { style: { fontSize: 13, color: S2.wDelta != null && S2.wDelta <= 0 ? "var(--move-ink)" : "var(--ink2)" } }, goals.adopted.monthWeight && S2.wNow != null ? "Boss 战：30 天到 " + goals.monthWeight + " kg，" + (S2.wNow <= goals.monthWeight ? "已经打赢了" : "还差 " + (S2.wNow - goals.monthWeight).toFixed(1) + " kg") : S2.wDelta == null ? S2.wNow != null ? "记满一周就能看到变化" : "记一次就有线了" : "一周 " + (S2.wDelta <= 0 ? "−" : "+") + Math.abs(S2.wDelta).toFixed(1) + " kg"), /* @__PURE__ */ import_react11.default.createElement(
+    "form",
+    {
+      className: "lf-wform",
+      onSubmit: (e) => {
+        e.preventDefault();
+        const v = parseFloat(String(wIn).replace(/[^\d.]/g, ""));
+        if (!(v >= 25 && v <= 250)) {
+          say("体重填 25–250 之间");
+          return;
+        }
+        addWeight(v);
+        setWIn("");
+      },
+      style: { position: "relative", zIndex: 3, display: "flex", gap: 6, alignItems: "center", marginTop: 10, alignSelf: "flex-start" }
+    },
+    /* @__PURE__ */ import_react11.default.createElement(
+      "input",
+      {
+        value: wIn,
+        onChange: (e) => setWIn(e.target.value),
+        inputMode: "decimal",
+        placeholder: "今天多少 kg",
+        "aria-label": "今天的体重，单位 kg",
+        style: { width: 108, height: 32, padding: "0 10px", borderRadius: 10, border: "1px solid var(--rule)", background: "var(--fill2,rgba(255,255,255,.72))", color: "var(--ink)", font: "inherit", fontSize: 13 }
+      }
+    ),
+    /* @__PURE__ */ import_react11.default.createElement("button", { type: "submit", style: { height: 32, padding: "0 13px", borderRadius: 10, border: 0, background: "#0E6E6E", color: "#F4F5F1", font: "inherit", fontSize: 13, fontWeight: 600, cursor: "pointer" } }, "记下")
+  )), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("week", 9), cls: "s8" }, /* @__PURE__ */ import_react11.default.createElement(WeekBoard, { S: S2 })), /* @__PURE__ */ import_react11.default.createElement(Card, { ...P2("todos", 10), cls: "s4", back: /* @__PURE__ */ import_react11.default.createElement(BackTodos, { records: db.records, today: S2.today, onRestore: unarchiveTodo }) }, /* @__PURE__ */ import_react11.default.createElement("div", { className: "lf-row", style: { justifyContent: "space-between", marginBottom: 6 } }, /* @__PURE__ */ import_react11.default.createElement("h2", { className: "lf-h" }, "要做的事"), S2.todos.some((x) => x.done) || pend ? /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-row", style: { gap: 10 } }, !pend && /* @__PURE__ */ import_react11.default.createElement("span", { className: "lf-sub" }, S2.todos.filter((x) => x.done).length, " / ", S2.todos.length, " 完成"), /* @__PURE__ */ import_react11.default.createElement(
     "button",
     {
       type: "button",
