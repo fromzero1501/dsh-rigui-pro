@@ -74,6 +74,8 @@ const CSS = `
 .rh-toast .a{display:flex;gap:8px;margin-top:11px}
 .rh-toast .a button{height:32px;padding:0 13px;border-radius:9px;border:0;font:inherit;font-size:13px;cursor:pointer;background:rgba(255,255,255,.13);color:#F4F5F1}
 .rh-toast .a button.main{background:#F2994A;color:#1F2328;font-weight:600}
+.rh-prep{align-self:center;display:flex;align-items:center;gap:7px;font-size:12px;color:#3F4A55;background:rgba(255,255,255,.94);border:1px solid rgba(0,0,0,.07);border-radius:999px;padding:6px 13px;box-shadow:0 10px 26px rgba(16,20,24,.16)}
+.rh-prep::before{content:"";width:6px;height:6px;border-radius:3px;background:#3B82C4;animation:rh-blink 1.1s ease-in-out infinite}
 `
 
 const drop = (color, size = 8) => <i style={{ background: color }} aria-hidden="true" />
@@ -260,12 +262,14 @@ export function BackRoutine({ rules, onToggle, onEvery, onGap, onSit }) {
   )
 }
 
-export function ReminderStack({ items, onDone, onSnooze, onSkip }) {
+export function ReminderStack({ items, onDone, onSnooze, onSkip, speaking }) {
   if (!items || !items.length) return null
+  const prep = !!(speaking && speaking.preparing)
   return (
     <>
       <style>{CSS}</style>
       <div className="rh-stack" role="status">
+        {prep ? <div className="rh-prep">语音还在备，好了马上念</div> : null}
         {items.slice(0, 2).map((a) => (
           <div className="rh-toast" key={a.id}>
             <div className="h"><span style={{ width: 8, height: 8, borderRadius: 4, background: (ROUTINE[a.kind] || ROUTINE.custom).color }} />{a.title}</div>

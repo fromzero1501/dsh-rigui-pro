@@ -619,14 +619,42 @@ function tailQuiet(file) {
   })
 }
 
+// 真的往文件尾部补一段静音（不是播放时加滤镜——ffplay 的 -autoexit 读到文件尾
+// 就关声卡，滤镜补的尾巴它也来不及放）。补进文件里以后，最后一个字就完整了。
+function padTail(file, ext) {
+  return new Promise((resolve) => {
+    const ff = ffmpegPath()
+    if (!ff) { resolve(file); return }
+    const out = file.replace(/\.[^.]+$/, '') + '-pad' + ext
+    const codec = ext === '.wav' ? ['-c:a', 'pcm_s16le'] : ['-c:a', 'libmp3lame', '-q:a', '5']
+    const p = spawn(ff, ['-y', '-v', 'error', '-i', file, '-af', 'apad=pad_dur=0.45', ...codec, out], {
+      windowsHide: true,
+      stdio: 'ignore',
+    })
+    let done = false
+    const finish = (ok) => {
+      if (done) return
+      done = true
+      if (ok) { try { if (statSync(out).size > 800) { try { unlinkSync(file) } catch {}; resolve(out); return } } catch {} }
+      try { unlinkSync(out) } catch {}
+      resolve(file)
+    }
+    p.on('error', () => finish(false))
+    p.on('close', (code) => finish(code === 0))
+    setTimeout(() => { try { p.kill() } catch {}; finish(false) }, 15000).unref?.()
+  })
+}
+
 // 合成一条并挑收尾最干净的：同一条重合成会不一样，最多试 4 次，够 40ms 就收手，否则留最好那版。
+// 每一条都先补上 0.45 秒静音再量——补过之后收尾天然干净，重合成基本用不上。
 async function synthClean(v, text, dir) {
   const tries = 4
   let best = null
   for (let i = 0; i < tries; i++) {
     const r = await synthFor(v, text)
-    const tmp = join(dir, 'tmp-' + Date.now() + '-' + i + r.ext)
+    let tmp = join(dir, 'tmp-' + Date.now() + '-' + i + r.ext)
     writeFileSync(tmp, r.buf)
+    tmp = await padTail(tmp, r.ext)
     const q = await tailQuiet(tmp)
     const score = q == null ? 999 : q
     if (!best || score > best.score) {
@@ -671,17 +699,18 @@ function markVoiceError(v, e, at) {
   return v
 }
 
-async function speakNow(v, text) {
+// 备好这一条的音频，但不播（后台预热和到点播放都走这里）。
+// 命中缓存先量收尾：老文件没补过静音、尾巴不干净的，重合成一份盖掉。
+async function ensureAudio(v, text) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 300)
   if (!clean) throw new Error('没有可念的内容')
   const dir = voiceDir()
   const key = cacheKey(v, clean)
   let file = findCached(dir, key)
   const cached = !!file
-  // 旧的缓存文件里就有「最后一个字只读一半」的：量出来收尾几乎没有衰减就重合成一份盖掉
   if (file && !tailOk.has(file)) {
     const q = await tailQuiet(file)
-    if (q != null && q < 25) {
+    if (q != null && q < 120) {
       try { unlinkSync(file) } catch {}
       file = ''
     } else {
@@ -694,9 +723,14 @@ async function speakNow(v, text) {
     try { renameSync(pick.tmp, file) } catch { writeFileSync(file, readFileSync(pick.tmp)); try { unlinkSync(pick.tmp) } catch {} }
     tailOk.add(file)
   }
-  startPlay(file)
   cacheStat()
   return { file, cached, text: clean }
+}
+
+async function speakNow(v, text) {
+  const r = await ensureAudio(v, text)
+  startPlay(r.file)
+  return r
 }
 
 // ---------- 提醒推算 ----------
@@ -1092,6 +1126,73 @@ export function apply(ctx) {
     watch.child = null
   }
 
+  // 到点念：先把音频备好再播。还没备好的那一小会儿，界面显示「处理中」
+  let saying = null
+  const warm = { busy: false }
+  let tickCount = 0
+
+  function sayAlarm(alarmId, v, text) {
+    const clean = String(text || '')
+    saying = { id: alarmId || '', text: clean, preparing: true, since: Date.now() }
+    return ensureAudio(v, clean)
+      .then((r) => {
+        saying = { id: alarmId || '', text: r.text, preparing: false, since: Date.now() }
+        startPlay(r.file)
+        v.lastAt = Date.now()
+        v.lastError = ''
+        v.lastErrorAt = 0
+        store.voice = v
+        save()
+      })
+      .catch((e) => {
+        saying = null
+        markVoiceError(v, e, Date.now())
+        store.voice = v
+        save()
+      })
+  }
+
+  // 后台把今天会用到的台词先合成好，到点就有现成的
+  async function warmRun(jobs) {
+    if (warm.busy) return
+    warm.busy = true
+    try {
+      const v = readVoice(store)
+      if (!v.enabled) return
+      for (const text of jobs) {
+        const clean = String(text || '').trim()
+        if (!clean) continue
+        if (findCached(voiceDir(), cacheKey(v, clean))) continue
+        try {
+          await ensureAudio(v, clean)
+        } catch (e) {
+          markVoiceError(v, e, Date.now())
+          store.voice = v
+          save()
+          return
+        }
+      }
+    } finally { warm.busy = false }
+  }
+
+  function warmUpcoming() {
+    if (warm.busy) return
+    const now = Date.now()
+    const v = readVoice(store)
+    if (!v.enabled) return
+    const jobs = []
+    for (const r of store.rules) {
+      if (!r || r.enabled === false) continue
+      if (v.read[r.kind] === false || v.groups.routine === false) continue
+      jobs.push(phraseFor(store, r.kind, now))
+    }
+    for (const g of ['todo', 'event']) {
+      if (v.groups[g] === false) continue
+      jobs.push(phraseFor(store, g, now))
+    }
+    if (jobs.length) warmRun(jobs)
+  }
+
   function runTick() {
     try {
       const now = Date.now()
@@ -1113,14 +1214,12 @@ export function apply(ctx) {
             const said = grp === 'routine'
               ? phraseFor(store, last.kind, now)
               : String(last.title || '').slice(0, 60) + '，' + phraseFor(store, grp, now)
-            speakNow(v, said).catch((e) => {
-              markVoiceError(v, e, Date.now())
-              store.voice = v
-              save()
-            })
+            sayAlarm(last.id, v, said)
           }
         }
       }
+      // 每两分钟看一眼今天要念的台词备齐了没（已在缓存里的直接跳过，不重复合成）
+      if (++tickCount % 8 === 0) warmUpcoming()
     } catch (e) { console.warn('[dsh-rigui-pro] 提醒轮询出错', e && e.message) }
   }
 
@@ -1130,9 +1229,12 @@ export function apply(ctx) {
     setTimeout(runTick, 2500)
     const boot = setTimeout(startWatch, 1500)
     if (typeof boot.unref === 'function') boot.unref()
+    const firstWarm = setTimeout(warmUpcoming, 4000)
+    if (typeof firstWarm.unref === 'function') firstWarm.unref()
     return () => {
       if (timer) clearInterval(timer)
       clearTimeout(boot)
+      clearTimeout(firstWarm)
       stopWatch()
     }
   }, 'dsh-rigui-pro: 提醒调度与活动采样')
@@ -1156,6 +1258,7 @@ export function apply(ctx) {
       today: {},
       ai: store.ai || { provider: '', model: '' },
       voice: readVoice(store),
+      speaking: saying ? { id: saying.id, text: saying.text, preparing: !!saying.preparing, since: saying.since } : null,
       activity: actView(store, now),
     }
   }
@@ -1287,6 +1390,7 @@ export function apply(ctx) {
             if (def) store.rules.push({ ...def })
           }
           save()
+          warmUpcoming()
         }
         return { ok: true, result: statePayload(now) }
       }
@@ -1363,7 +1467,10 @@ export function apply(ctx) {
     if (body.endpoint === 'voice') {
       const v = readVoice(store)
       const action = p.action || 'get'
-      if (action === 'get') return { ok: true, result: { voice: v, defaults: defaultLines(), ffplay: !!ffplayPath(), cache: cacheStat(), playing: !!playing } }
+      if (action === 'get') {
+        const sp = saying ? { id: saying.id, text: saying.text, preparing: !!saying.preparing, since: saying.since } : null
+        return { ok: true, result: { voice: v, defaults: defaultLines(), ffplay: !!ffplayPath(), cache: cacheStat(), playing: !!playing, speaking: sp } }
+      }
       if (action === 'set') {
         const next = mergeVoice(v, p.voice)
         // 换了配置就把上一次的错误清掉：那条多半是对着旧配置报的，留着只会让人以为还没修好
@@ -1371,6 +1478,7 @@ export function apply(ctx) {
         next.lastErrorAt = 0
         store.voice = next
         save()
+        warmUpcoming() // 换了配置，缓存全作废，后台重新备一遍
         return { ok: true, result: { voice: next, defaults: defaultLines(), ffplay: !!ffplayPath(), cache: cacheStat() } }
       }
       if (action === 'say' || action === 'test') {
@@ -1394,6 +1502,7 @@ export function apply(ctx) {
       if (action === 'stop') {
         try { if (playing) playing.kill() } catch {}
         playing = null
+        saying = null
         queue = Promise.resolve() // 队列里排着的也一起作废
         return { ok: true, result: { stopped: true } }
       }

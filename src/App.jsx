@@ -350,6 +350,7 @@ export default function LifeApp() {
   const [activity, setActivity] = useState(null)
   const [coachLines, setCoachLines] = useState([])
   const [voice, setVoice] = useState(null)
+  const [speaking, setSpeaking] = useState(null)
   const [voiceMeta, setVoiceMeta] = useState({ ffplay: false, cache: null })
   const [voiceDefaults, setVoiceDefaults] = useState(null)
   const [voiceOpen, setVoiceOpen] = useState(false)
@@ -585,6 +586,7 @@ export default function LifeApp() {
       setReminders(j.result.due || [])
       setReminderNext(j.result.next || [])
       if (j.result.activity) setActivity(j.result.activity)
+      setSpeaking(j.result.speaking || null)
       if (j.result.voice) setVoice(j.result.voice)
       if (j.result.ai) setAiPick({ provider: j.result.ai.provider || '', model: j.result.ai.model || '' })
     }
@@ -599,6 +601,7 @@ export default function LifeApp() {
       if (r.voice) setVoice(r.voice)
       if (r.defaults) setVoiceDefaults(r.defaults)
       if (typeof r.ffplay === 'boolean') setVoiceMeta({ ffplay: r.ffplay, cache: r.cache || null })
+      if ('speaking' in r) setSpeaking(r.speaking || null)
       if (j && j.ok === false) say(j.error || '语音没成')
       return j
     } catch (e) {
@@ -1553,7 +1556,7 @@ export default function LifeApp() {
         onToggleRead={(k, on) => voiceSet({ read: { [k]: on } })}
         onGroup={(g, on) => voiceSet({ groups: { [g]: on } })}
         onLead={(d) => voiceSet({ leadMin: Math.max(0, Math.min(60, Number(voice && voice.leadMin) || 0) + d) })} />
-      <ReminderStack items={reminders} onDone={reminderDone} onSnooze={reminderSnooze} onSkip={reminderSkip} />
+      <ReminderStack items={reminders} onDone={reminderDone} onSnooze={reminderSnooze} onSkip={reminderSkip} speaking={speaking} />
       {bursts.map((b) => (
         <div key={b.id} aria-hidden="true" style={{ position: 'fixed', left: b.x, top: b.y, width: 0, height: 0, zIndex: 40, pointerEvents: 'none' }}>
           {b.big && <span className="lf-ring" />}
