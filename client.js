@@ -5166,7 +5166,7 @@ var CSS4 = `
 .md-body{position:relative;flex:1;width:100%;margin-top:2px;border:1.5px solid rgba(31,35,40,.16);border-radius:7px 7px 12px 12px;background:linear-gradient(to bottom,#FFFFFF,#F6F8FA);overflow:hidden;min-height:0;box-shadow:inset 0 1px 3px rgba(31,35,40,.05)}
 .md-pot.empty .md-body{border-style:dashed;opacity:.55}
 .md-slots{position:absolute;inset:4px}
-.md-pill{position:absolute;width:12px;height:12px;border-radius:50%;border:1px solid rgba(31,35,40,.14);box-sizing:border-box;background:radial-gradient(circle at 34% 26%,#FFFFFF 0%,#F7F9FB 38%,color-mix(in srgb,var(--pc,#9AA1AA) 78%,#DDE4EC) 100%);box-shadow:inset 0 -1.5px 2px rgba(31,35,40,.14),inset 0 1.5px 1.5px rgba(255,255,255,.95),0 1.5px 2px rgba(31,35,40,.18);transform:translate(-50%,-50%) rotate(var(--rot,0deg));transition:opacity .24s ease,filter .24s ease;pointer-events:none}
+.md-pill{position:absolute;width:12px;height:12px;border-radius:50%;border:1px solid color-mix(in srgb,var(--pc,#9AA1AA) 74%,#6F7B87);box-sizing:border-box;background:color-mix(in srgb,var(--pc,#9AA1AA) 84%,#9AA5B1);box-shadow:inset 0 -2px 3px rgba(31,35,40,.20),0 1px 2px rgba(31,35,40,.16);transform:translate(-50%,-50%) rotate(var(--rot,0deg));transition:opacity .24s ease,filter .24s ease;pointer-events:none}
 .md-pill::after{content:"";position:absolute;left:50%;top:50%;width:7px;height:1.4px;border-radius:1px;background:rgba(31,35,40,.13);transform:translate(-50%,-50%)}
 .md-pill.on{opacity:0;filter:blur(.6px)}
 .md-legend{display:flex;flex-direction:column;gap:1px;min-width:0}
