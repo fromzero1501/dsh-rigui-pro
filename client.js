@@ -5160,29 +5160,28 @@ var CSS4 = `
 .wh-say{margin-top:0;align-self:auto}
 .wh-minus{width:27px;height:27px;flex:none;border-radius:9px;border:1px solid var(--rule,rgba(31,35,40,.12));background:transparent;color:var(--ink2,#6B7280);font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:0}
 .wh-minus:disabled{opacity:.35;cursor:default}
-.md-zone{display:flex;align-items:center;gap:9px;margin-left:auto;flex:0 0 auto;min-width:0}
-.md-pot{position:relative;flex:none;width:52px;height:98px;display:flex;flex-direction:column;align-items:center}
-.md-cap{width:26px;height:8px;border-radius:3px 3px 1px 1px;background:rgba(31,35,40,.2);flex:none}
-.md-body{flex:1;width:100%;margin-top:1px;border:2px solid rgba(31,35,40,.2);border-radius:5px 5px 9px 9px;background:linear-gradient(to bottom,rgba(255,255,255,.65),rgba(31,35,40,.04));padding:5px 3px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
-.md-pot.empty .md-body{border-style:dashed;opacity:.5}
-.md-slots{display:flex;flex-direction:column;gap:4px;overflow-y:auto;scrollbar-width:none;min-height:0}
+.md-zone{display:flex;align-items:center;gap:12px;margin-left:auto;flex:0 0 auto;min-width:0}
+.md-pot{position:relative;flex:none;width:58px;height:98px;display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 1px 2px rgba(31,35,40,.05))}
+.md-cap{width:32px;height:9px;border-radius:3px 3px 2px 2px;background:linear-gradient(to bottom,#F4F7FA,#D7DEE7);box-shadow:inset 0 -1px 0 rgba(31,35,40,.10);flex:none}
+.md-body{flex:1;width:100%;margin-top:2px;border:1.5px solid rgba(31,35,40,.16);border-radius:7px 7px 12px 12px;background:linear-gradient(to bottom,#FFFFFF,#F7F8FA);padding:8px 5px;overflow:hidden;display:flex;flex-direction:column;min-height:0;box-shadow:inset 0 1px 3px rgba(31,35,40,.05)}
+.md-pot.empty .md-body{border-style:dashed;opacity:.55}
+.md-slots{display:flex;flex-direction:column;gap:6px;overflow-y:auto;scrollbar-width:none;min-height:0}
 .md-slots::-webkit-scrollbar{width:0;height:0}
-.md-med{display:flex;flex-wrap:wrap;gap:2px;justify-content:center;padding:1px 0}
-.md-pill{position:relative;width:9px;height:16px;padding:0;border:1.5px solid var(--pc,#3B82C4);border-radius:5px;background:#fff;box-sizing:border-box;cursor:pointer;transition:background .12s ease,opacity .12s ease}
-.md-pill::after{content:"";position:absolute;inset:-3px}
-.md-pill:hover{background:rgba(59,130,196,.10)}
-.md-pill.on{background:var(--pc,#3B82C4);opacity:.32;border-color:var(--pc,#3B82C4)}
+.md-med{display:flex;flex-wrap:wrap;align-content:flex-start;justify-content:center;gap:3px}
+.md-pill{position:relative;width:14px;height:7px;padding:0;border:1.5px solid var(--pc,#3B82C4);border-radius:3.5px;background:#fff;box-sizing:border-box;cursor:pointer;transition:background .14s ease,transform .12s ease}
+.md-pill::after{content:"";position:absolute;inset:-4px}
+.md-pill:hover{transform:translateY(-1px)}
+.md-pill.on{background:var(--pc,#3B82C4);opacity:.42;border-color:var(--pc,#3B82C4)}
 .md-legend{display:flex;flex-direction:column;gap:1px;min-width:0}
-.md-row{display:flex;align-items:center;gap:3px;min-width:0}
-.md-take{display:flex;align-items:center;gap:5px;min-width:0;padding:2px 5px;border:0;border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:11.5px;line-height:1.35;text-align:left;cursor:pointer}
-.md-take:hover:enabled{background:rgba(59,130,196,.10)}
+.md-row{display:flex;align-items:center;gap:2px;min-width:0}
+.md-take{display:flex;align-items:baseline;gap:6px;min-width:0;padding:3px 4px;border:0;border-radius:8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.md-take:hover:enabled{background:rgba(59,130,196,.08)}
 .md-take:disabled{cursor:default}
-.md-dot{width:8px;height:14px;border-radius:4px;border:1.5px solid;box-sizing:border-box;flex:none}
-.md-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.md-cnt{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink,#1F2328)}
+.md-name{max-width:64px;font-size:12.5px;font-weight:500;color:var(--ink,#1F2328);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.md-cnt{font-size:11px;font-weight:600;color:#9AA1AA;font-variant-numeric:tabular-nums}
 .md-cnt.done{color:#1E9E6A}
-.md-minus{flex:none;width:18px;height:18px;padding:0;border:1px solid rgba(31,35,40,.16);border-radius:6px;background:transparent;color:var(--ink2,#6B7280);font-size:12px;line-height:1;cursor:pointer}
-.md-minus:hover:enabled{border-color:rgba(226,96,76,.65);color:#E2604C}
+.md-minus{flex:none;display:grid;place-items:center;width:18px;height:18px;padding:0;border:1px solid rgba(31,35,40,.14);border-radius:50%;background:#fff;color:#9AA1AA;font-size:12px;line-height:1;cursor:pointer}
+.md-minus:hover:enabled{border-color:rgba(226,96,76,.6);background:rgba(226,96,76,.06);color:#E2604C}
 .md-minus:disabled{opacity:.28;cursor:default}
 .md-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .md-edit{display:flex;align-items:center;gap:6px}
@@ -5363,9 +5362,8 @@ function WaterCard({ ctx }) {
         "aria-label": m.name + " 第 " + Math.min(c + 1, m.times) + " 次，共 " + m.times + " 次"
       }
     )));
-  })) : null)), /* @__PURE__ */ import_react10.default.createElement("div", { className: "md-legend" }, list.length ? list.map((m, i) => {
+  })) : null)), /* @__PURE__ */ import_react10.default.createElement("div", { className: "md-legend" }, list.length ? list.map((m) => {
     const c = cntOf(m.id);
-    const col = MED_COLORS[i % MED_COLORS.length];
     const done = c >= m.times;
     return /* @__PURE__ */ import_react10.default.createElement("div", { className: "md-row", key: m.id }, /* @__PURE__ */ import_react10.default.createElement(
       "button",
@@ -5380,7 +5378,6 @@ function WaterCard({ ctx }) {
         title: done ? m.name + " 今天吃够了" : "点一下，记一次 " + m.name,
         "aria-label": m.name + " 已吃 " + c + " 次，共 " + m.times + " 次" + (done ? "，今天吃够了" : "，点一下记一次")
       },
-      /* @__PURE__ */ import_react10.default.createElement("i", { className: "md-dot", style: { borderColor: col, background: done ? col : "transparent" }, "aria-hidden": "true" }),
       /* @__PURE__ */ import_react10.default.createElement("span", { className: "md-name" }, m.name),
       /* @__PURE__ */ import_react10.default.createElement("b", { className: "md-cnt" + (done ? " done" : "") }, c, "/", m.times)
     ), /* @__PURE__ */ import_react10.default.createElement(
