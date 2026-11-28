@@ -43,15 +43,11 @@ const CSS = `
 .md-zone{display:flex;align-items:center;gap:12px;margin-left:auto;flex:0 0 auto;min-width:0}
 .md-pot{position:relative;flex:none;width:58px;height:98px;display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 1px 2px rgba(31,35,40,.05))}
 .md-cap{width:32px;height:9px;border-radius:3px 3px 2px 2px;background:linear-gradient(to bottom,#F4F7FA,#D7DEE7);box-shadow:inset 0 -1px 0 rgba(31,35,40,.10);flex:none}
-.md-body{flex:1;width:100%;margin-top:2px;border:1.5px solid rgba(31,35,40,.16);border-radius:7px 7px 12px 12px;background:linear-gradient(to bottom,#FFFFFF,#F7F8FA);padding:8px 5px;overflow:hidden;display:flex;flex-direction:column;min-height:0;box-shadow:inset 0 1px 3px rgba(31,35,40,.05)}
+.md-body{position:relative;flex:1;width:100%;margin-top:2px;border:1.5px solid rgba(31,35,40,.16);border-radius:7px 7px 12px 12px;background:linear-gradient(to bottom,#FFFFFF,#F6F8FA);overflow:hidden;min-height:0;box-shadow:inset 0 1px 3px rgba(31,35,40,.05)}
 .md-pot.empty .md-body{border-style:dashed;opacity:.55}
-.md-slots{display:flex;flex-direction:column;gap:6px;overflow-y:auto;scrollbar-width:none;min-height:0}
-.md-slots::-webkit-scrollbar{width:0;height:0}
-.md-med{display:flex;flex-wrap:wrap;align-content:flex-start;justify-content:center;gap:3px}
-.md-pill{position:relative;width:14px;height:7px;padding:0;border:1.5px solid var(--pc,#3B82C4);border-radius:3.5px;background:#fff;box-sizing:border-box;cursor:pointer;transition:background .14s ease,transform .12s ease}
-.md-pill::after{content:"";position:absolute;inset:-4px}
-.md-pill:hover{transform:translateY(-1px)}
-.md-pill.on{background:var(--pc,#3B82C4);opacity:.42;border-color:var(--pc,#3B82C4)}
+.md-slots{position:absolute;inset:4px}
+.md-pill{position:absolute;width:13px;height:6.5px;border-radius:3.25px;border:1.5px solid var(--pc,#3B82C4);background:linear-gradient(to bottom,#FFFFFF,#EFF3F8);box-sizing:border-box;pointer-events:none;transition:opacity .16s ease,background .16s ease,border-color .16s ease}
+.md-pill.on{background:var(--pc,#3B82C4);border-color:var(--pc,#3B82C4);opacity:.28}
 .md-legend{display:flex;flex-direction:column;gap:1px;min-width:0}
 .md-row{display:flex;align-items:center;gap:2px;min-width:0}
 .md-take{display:flex;align-items:baseline;gap:6px;min-width:0;padding:3px 4px;border:0;border-radius:8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
@@ -203,8 +199,24 @@ export function RoutineCard({ ctx }) {
 }
 
 // 喝水：一张卡就是一只杯子，点一次水位往上走一格，满 8 杯停在满格。
-// 旁边一只药瓶：一种药一排，一天几次就几颗药丸；点一颗算吃了一次，吃够了再点就撤回来。
+// 旁边一只药瓶：里面按满瓶的样子散着药片，一种药一个颜色，一天几次就几片；
+// 位置是写死的，吃了哪片哪片淡下去，不会重排。
 const MED_COLORS = ['#E2604C', '#3B82C4', '#1E9E6A', '#8B6BD9', '#D9963A', '#4C8C8C']
+// 药瓶里药片的固定落点（相对瓶身的百分比 + 倾角），按顺序取，满了才循环。
+const PILL_SLOTS = [
+  { x: 24, y: 11, r: -14 },
+  { x: 66, y: 9, r: 22 },
+  { x: 45, y: 23, r: 6 },
+  { x: 15, y: 29, r: 28 },
+  { x: 78, y: 33, r: -9 },
+  { x: 35, y: 41, r: -26 },
+  { x: 62, y: 49, r: 15 },
+  { x: 18, y: 55, r: 8 },
+  { x: 82, y: 61, r: -18 },
+  { x: 45, y: 65, r: 30 },
+  { x: 68, y: 76, r: -4 },
+  { x: 30, y: 80, r: 20 },
+]
 
 export function WaterCard({ ctx }) {
   const { S, onLog, onMinus, onSay, voice, meds, onMed, onMedUndo } = ctx
@@ -218,12 +230,18 @@ export function WaterCard({ ctx }) {
   const today = (S.meds && S.meds.today) || {}
   const cntOf = (id) => (today[id] && today[id].count) || 0
   const allDone = list.length > 0 && list.every((m) => cntOf(m.id) >= m.times)
+  // 瓶里该有几片就摆几片：按药顺序铺开，落点取自固定坐标表，吃掉的只淡色、不换位。
+  const pills = []
+  list.forEach((m, mi) => {
+    const c = cntOf(m.id)
+    for (let k = 0; k < m.times; k += 1) pills.push({ key: m.id + '-' + k, di: mi, taken: k < c })
+  })
   return (
     <>
       <style>{CSS}</style>
       <div className="lf-row" style={{ justifyContent: 'space-between', marginBottom: 2 }}>
         <h2 className="lf-h">喝水吃药</h2>
-        <span className="lf-sub">{allDone ? '今天的药吃完了' : list.length ? '点药丸记一次' : (full ? '今天喝够了' : '点一下杯子加一杯')}</span>
+        <span className="lf-sub">{allDone ? '今天的药吃完了' : list.length ? '点药名记一次' : (full ? '今天喝够了' : '点一下杯子加一杯')}</span>
       </div>
       <div className="wh-wrap">
         <button
@@ -266,25 +284,22 @@ export function WaterCard({ ctx }) {
           <div className={'md-pot' + (list.length ? '' : ' empty')}>
             <span className="md-cap" aria-hidden="true" />
             <span className="md-body">
-              {list.length ? (
-                <span className="md-slots">
-                  {list.map((m, i) => {
-                    const c = cntOf(m.id)
-                    const col = MED_COLORS[i % MED_COLORS.length]
+              {pills.length ? (
+                <span className="md-slots" aria-hidden="true">
+                  {pills.map((p, i) => {
+                    const s = PILL_SLOTS[i % PILL_SLOTS.length]
                     return (
-                      <span className="md-med" key={m.id}>
-                        {Array.from({ length: m.times }).map((_, k) => (
-                          <button
-                            key={k}
-                            type="button"
-                            className={'md-pill' + (k < c ? ' on' : '')}
-                            style={{ '--pc': col }}
-                            onClick={(e) => { e.stopPropagation(); if (c >= m.times) onMedUndo(m); else onMed(m) }}
-                            title={m.name + '：第 ' + Math.min(c + 1, m.times) + ' 次，共 ' + m.times + ' 次；吃够了再点一下撤回来'}
-                            aria-label={m.name + ' 第 ' + Math.min(c + 1, m.times) + ' 次，共 ' + m.times + ' 次'}
-                          />
-                        ))}
-                      </span>
+                      <span
+                        key={p.key}
+                        className={'md-pill' + (p.taken ? ' on' : '')}
+                        style={{
+                          '--pc': MED_COLORS[p.di % MED_COLORS.length],
+                          left: s.x + '%',
+                          top: s.y + '%',
+                          transform: 'translate(-50%,-50%) rotate(' + s.r + 'deg)',
+                          zIndex: Math.round(s.y),
+                        }}
+                      />
                     )
                   })}
                 </span>
@@ -363,7 +378,7 @@ export function BackWaterMeds({ meds, onChange }) {
       {local.length < 6 ? (
         <button type="button" className="rh-open md-add" onClick={add}>+ 加一种药</button>
       ) : null}
-      <p className="rh-note">一天几次就放几片药；药名点一下记一次，旁边的减号撤回，药瓶里的药片点一下也一样。名字最多 12 个字，最多 6 种药。</p>
+      <p className="rh-note">一天几次就放几片药，药片位置是固定的，吃一片淡一片。药名点一下记一次，旁边的减号撤回。名字最多 12 个字，最多 6 种药。</p>
     </>
   )
 }
